@@ -1,0 +1,16 @@
+# Probe artifacts
+logs/
+*.log
+
+# Secrets
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS
+.DS_Store

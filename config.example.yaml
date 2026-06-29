@@ -1,0 +1,66 @@
+# HyperDeck Archiver configuration.
+# Copy to config.yaml and edit. Secrets go in .env (see .env.example).
+
+decks:
+  - name: Deck1          # becomes the NAS folder name: /footage/<date>/Deck1/
+    host: 172.16.9.81
+    enabled: true
+    slots: [1, 2]        # HyperDeck Studio HD Mini has 2 SD slots
+  - name: Deck2
+    host: 172.16.9.82
+    enabled: true
+    slots: [1, 2]
+
+  # Add the two Studio HD Pros here once you have their IPs:
+  # - name: Deck3
+  #   host: 172.16.9.83
+  #   enabled: false     # flip to true once reachable
+  #   slots: [1, 2]
+  # - name: Deck4
+  #   host: 172.16.9.84
+  #   enabled: false
+  #   slots: [1, 2]
+
+nas:
+  # Where the SMB share is mounted on this host. Persistent auto-mount is
+  # recommended (macOS: autofs/Connect to Server; Pi/Linux: /etc/fstab).
+  #   macOS example: /Volumes/Footage
+  #   Linux/Pi example: /mnt/footage
+  mount_root: /Volumes/Footage
+  footage_root: footage            # dated folders live under mount_root/footage_root
+  share: footage
+  smb_url: "smb://192.168.6.52"
+  min_free_gb: 200                 # abort ingest if NAS free space drops below this
+
+ingest:
+  concurrency: 4                   # copy this many decks in parallel
+  clear_cards: false               # SET true AFTER the first successful archive.
+                                   # When true, a slot is BMD-formatted only after
+                                   # every clip on it is downloaded + verified.
+  date_folder_format: "%Y-%m-%d"
+  # Per-slot folders ignore these macOS/Spotlight metadata entries:
+  skip_metadata: [".fseventsd", ".Spotlight-V100", ".Trashes", "._"]
+
+retention:
+  enabled: true
+  days: 30                         # prune deletes NAS date-folders older than this
+
+smtp:
+  host: smtp-mail.outlook.com
+  port: 587
+  starttls: true
+  from: archiver@example.com       # or set SMTP_FROM in .env
+  to:
+    - you@example.com
+  # credentials come from .env: SMTP_USER, SMTP_PASS
+
+notify:
+  on_success: true
+  on_failure: true
+
+hash:
+  algo: blake2b                    # blake2b (stdlib) | xxhash (needs: pip install xxhash)
+
+log:
+  file: logs/hyperdeck-archiver.log
+  level: INFO

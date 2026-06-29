@@ -6,6 +6,9 @@ logs/
 .env
 .env.*
 
+# Local config (site-specific; copy from config.example.yaml)
+config.yaml
+
 # Python
 __pycache__/
 *.py[cod]

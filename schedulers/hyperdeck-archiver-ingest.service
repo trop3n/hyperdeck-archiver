@@ -1,0 +1,10 @@
+[Unit]
+Description=HyperDeck Archiver - ingest (archive decks to NAS, clear cards)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=@@USER@@
+WorkingDirectory=@@INSTALL_DIR@@
+ExecStart=@@VENV_PYTHON@@ @@INSTALL_DIR@@/run.py --config @@INSTALL_DIR@@/config.yaml ingest

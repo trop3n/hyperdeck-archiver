@@ -24,6 +24,9 @@ def _build_parser() -> argparse.ArgumentParser:
     p_ingest.add_argument("--date", help="Run date folder YYYY-MM-DD (default: today)")
     p_ingest.add_argument("--deck", action="append", default=[], help="Limit to deck name(s)")
     p_ingest.add_argument("--no-clear", action="store_true", help="Do not format cards this run")
+    p_ingest.add_argument(
+        "--limit", type=int, help="Max video clips per slot (smoke testing; default: all)"
+    )
 
     p_prune = sub.add_parser("prune", help="Delete NAS date-folders older than retention")
     p_prune.add_argument("--retention-days", type=int, help="Override retention.days")
@@ -69,7 +72,12 @@ def main(argv: list[str] | None = None) -> int:
         when = datetime.strptime(args.date, "%Y-%m-%d") if args.date else None
         deck_filter = set(args.deck) if args.deck else None
         summary = ingest.run(
-            cfg, when=when, dry_run=args.dry_run, no_clear=args.no_clear, deck_filter=deck_filter
+            cfg,
+            when=when,
+            dry_run=args.dry_run,
+            no_clear=args.no_clear,
+            deck_filter=deck_filter,
+            max_clips_per_slot=args.limit,
         )
         send = cfg.notify_on_success if summary.succeeded else cfg.notify_on_failure
         if send:

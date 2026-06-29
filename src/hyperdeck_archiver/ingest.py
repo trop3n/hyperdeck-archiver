@@ -39,6 +39,7 @@ def _ingest_slot(
     date_str: str,
     dry_run: bool,
     do_clear: bool,
+    max_clips: int | None = None,
 ) -> SlotResult:
     sr = SlotResult(deck=deck.name, slot=slot)
     try:
@@ -48,7 +49,13 @@ def _ingest_slot(
         log.error("[%s slot %d] %s", deck.name, slot, sr.error)
         return sr
 
+    processed = 0
     for clip in clips:
+        if not clip.is_video:
+            continue
+        if max_clips is not None and processed >= max_clips:
+            break
+        processed += 1
         dest = _clip_dest(dest_root, slot, clip.name)
         with mlock:
             existing = manifest_mod.clip_entry(mdata, deck.name, slot, clip.name)
@@ -142,6 +149,7 @@ def _ingest_deck(
     date_str: str,
     dry_run: bool,
     do_clear: bool,
+    max_clips: int | None = None,
 ) -> DeckResult:
     result = DeckResult(deck=deck.name, host=deck.host)
     try:
@@ -165,7 +173,18 @@ def _ingest_deck(
             dest_root.mkdir(parents=True, exist_ok=True)
             result.slots.append(
                 _ingest_slot(
-                    cfg, deck, slot, ftp, bmd, dest_root, mdata, mlock, date_str, dry_run, do_clear
+                    cfg,
+                    deck,
+                    slot,
+                    ftp,
+                    bmd,
+                    dest_root,
+                    mdata,
+                    mlock,
+                    date_str,
+                    dry_run,
+                    do_clear,
+                    max_clips,
                 )
             )
     finally:
@@ -181,6 +200,7 @@ def run(
     dry_run: bool = False,
     no_clear: bool = False,
     deck_filter: set[str] | None = None,
+    max_clips_per_slot: int | None = None,
 ) -> RunSummary:
     when = when or datetime.now()
     date_str = when.strftime(cfg.date_folder_format)
@@ -229,6 +249,7 @@ def run(
                 date_str,
                 dry_run,
                 do_clear,
+                max_clips_per_slot,
             ): deck
             for deck in enabled
         }

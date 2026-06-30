@@ -20,6 +20,7 @@ class DeckConfig:
     host: str
     enabled: bool = True
     slots: tuple[int, ...] = (1, 2)
+    number: int = 1
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,9 @@ class Config:
     notify_on_success: bool
     notify_on_failure: bool
     hash_algo: str
+    rename_enabled: bool
+    rename_pattern: str
+    rename_date_format: str
     log_file: Path
     log_level: str
     raw: dict
@@ -92,9 +96,14 @@ def _build(raw: dict) -> Config:
         name = _require("name", d, f"decks[{i}]")
         host = _require("host", d, f"decks[{i}]")
         slots = tuple(int(s) for s in d.get("slots", [1, 2]))
+        number = int(d.get("number", i + 1))
         decks.append(
             DeckConfig(
-                name=str(name), host=str(host), enabled=bool(d.get("enabled", True)), slots=slots
+                name=str(name),
+                host=str(host),
+                enabled=bool(d.get("enabled", True)),
+                slots=slots,
+                number=number,
             )
         )
 
@@ -104,6 +113,7 @@ def _build(raw: dict) -> Config:
     smtp = raw.get("smtp", {}) or {}
     notify = raw.get("notify", {}) or {}
     hashing = raw.get("hash", {}) or {}
+    rename = raw.get("rename", {}) or {}
     log = raw.get("log", {}) or {}
 
     smtp_from = os.environ.get("SMTP_FROM") or str(smtp.get("from", ""))
@@ -135,6 +145,9 @@ def _build(raw: dict) -> Config:
         notify_on_success=bool(notify.get("on_success", True)),
         notify_on_failure=bool(notify.get("on_failure", True)),
         hash_algo=str(hashing.get("algo", "blake2b")),
+        rename_enabled=bool(rename.get("enabled", False)),
+        rename_pattern=str(rename.get("pattern", "{date} {deck} {seq:03d}")),
+        rename_date_format=str(rename.get("date_format", "%m-%d-%Y")),
         log_file=Path(str(log.get("file", "logs/hyperdeck-archiver.log"))),
         log_level=str(log.get("level", "INFO")),
         raw=raw,

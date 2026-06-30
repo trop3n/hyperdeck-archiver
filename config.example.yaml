@@ -4,10 +4,12 @@
 decks:
   - name: Deck1          # becomes the NAS folder name: /footage/<date>/Deck1/
     host: 172.16.9.81
+    number: 1            # appears in renamed filenames (MM-DD-YYYY <number> 001)
     enabled: true
     slots: [1, 2]        # HyperDeck Studio HD Mini has 2 SD slots
   - name: Deck2
     host: 172.16.9.82
+    number: 2
     enabled: true
     slots: [1, 2]
 
@@ -60,6 +62,11 @@ notify:
 
 hash:
   algo: blake2b                    # blake2b (stdlib) | xxhash (needs: pip install xxhash)
+
+rename:
+  enabled: false                   # flip to true to rename clips on the NAS
+  pattern: "{date} {deck} {seq:03d}"  # fields: {date} {deck} {seq}; -> e.g. 06-29-2026 1 001.mov
+  date_format: "%m-%d-%Y"          # how {date} is rendered
 
 log:
   file: logs/hyperdeck-archiver.log

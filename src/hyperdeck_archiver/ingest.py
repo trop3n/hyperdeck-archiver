@@ -7,6 +7,8 @@ failed clip blocks that slot's clear and is surfaced in the run summary.
 from __future__ import annotations
 
 import logging
+import os
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -22,9 +24,38 @@ from .transfer import download_and_verify
 
 log = logging.getLogger("hyperdeck_archiver.ingest")
 
+_SEQ_RE = re.compile(r"\s(\d+)\.[A-Za-z0-9]+$")
 
-def _clip_dest(dest_root: Path, slot: int, name: str) -> Path:
-    return dest_root / f"slot{slot}" / name
+
+def _max_seq_in(dest_root: Path) -> int:
+    """Highest existing sequence number among renamed files in dest_root (0 if none)."""
+    if not dest_root.exists():
+        return 0
+    best = 0
+    for p in dest_root.iterdir():
+        if not p.is_file():
+            continue
+        m = _SEQ_RE.search(p.name)
+        if m:
+            best = max(best, int(m.group(1)))
+    return best
+
+
+def _clip_dest(
+    cfg: Config,
+    deck: DeckConfig,
+    slot: int,
+    original_name: str,
+    dest_root: Path,
+    when: datetime,
+    seq: int | None,
+) -> Path:
+    if cfg.rename_enabled:
+        date_str = when.strftime(cfg.rename_date_format)
+        stem = cfg.rename_pattern.format(date=date_str, deck=deck.number, seq=seq)
+        ext = os.path.splitext(original_name)[1]
+        return dest_root / (stem + ext)
+    return dest_root / f"slot{slot}" / original_name
 
 
 def _ingest_slot(
@@ -37,9 +68,11 @@ def _ingest_slot(
     mdata: dict,
     mlock: threading.Lock,
     date_str: str,
+    when: datetime,
     dry_run: bool,
     do_clear: bool,
     max_clips: int | None = None,
+    counter: list[int] | None = None,
 ) -> SlotResult:
     sr = SlotResult(deck=deck.name, slot=slot)
     try:
@@ -56,7 +89,6 @@ def _ingest_slot(
         if max_clips is not None and processed >= max_clips:
             break
         processed += 1
-        dest = _clip_dest(dest_root, slot, clip.name)
         with mlock:
             existing = manifest_mod.clip_entry(mdata, deck.name, slot, clip.name)
         if existing and existing.get("status") == "verified" and existing.get("size") == clip.size:
@@ -64,7 +96,7 @@ def _ingest_slot(
                 ClipResult(
                     clip=clip,
                     status="skipped",
-                    dest_path=str(dest),
+                    dest_path=existing.get("dest", ""),
                     bytes_copied=clip.size or 0,
                     hash_algo=existing.get("hash_algo", ""),
                     hash_value=existing.get("hash", ""),
@@ -72,6 +104,12 @@ def _ingest_slot(
             )
             log.info("[%s slot %d] skip (already verified): %s", deck.name, slot, clip.name)
             continue
+
+        seq = None
+        if cfg.rename_enabled and counter is not None:
+            counter[0] += 1
+            seq = counter[0]
+        dest = _clip_dest(cfg, deck, slot, clip.name, dest_root, when, seq)
 
         if dry_run:
             sr.clips.append(ClipResult(clip=clip, status="pending", dest_path=str(dest)))
@@ -81,6 +119,8 @@ def _ingest_slot(
         sr.clips.append(cr)
         entry = {
             "name": clip.name,
+            "slot": slot,
+            "seq": seq,
             "size": clip.size,
             "hash_algo": cr.hash_algo,
             "hash": cr.hash_value,
@@ -147,6 +187,7 @@ def _ingest_deck(
     mdata: dict,
     mlock: threading.Lock,
     date_str: str,
+    when: datetime,
     dry_run: bool,
     do_clear: bool,
     max_clips: int | None = None,
@@ -168,9 +209,10 @@ def _ingest_deck(
         log.warning("[%s] BMD connect failed; slot status/format unavailable: %s", deck.name, e)
         bmd = None
 
+    dest_root.mkdir(parents=True, exist_ok=True)
+    counter = [_max_seq_in(dest_root)] if cfg.rename_enabled else [0]
     try:
         for slot in deck.slots:
-            dest_root.mkdir(parents=True, exist_ok=True)
             result.slots.append(
                 _ingest_slot(
                     cfg,
@@ -182,9 +224,11 @@ def _ingest_deck(
                     mdata,
                     mlock,
                     date_str,
+                    when,
                     dry_run,
                     do_clear,
                     max_clips,
+                    counter,
                 )
             )
     finally:
@@ -247,6 +291,7 @@ def run(
                 mdata,
                 mlock,
                 date_str,
+                when,
                 dry_run,
                 do_clear,
                 max_clips_per_slot,

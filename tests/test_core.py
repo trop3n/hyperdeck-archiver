@@ -179,13 +179,13 @@ def test_slot_no_video_clips_not_verified():
 
 class _RenameCfg:
     rename_enabled = True
-    rename_pattern = "{date} {deck} {seq:03d}"
+    rename_pattern = "{date} {deck}-{slot} {seq:03d}"
     rename_date_format = "%m-%d-%Y"
 
 
 class _NoRenameCfg:
     rename_enabled = False
-    rename_pattern = "{date} {deck} {seq:03d}"
+    rename_pattern = "{date} {deck}-{slot} {seq:03d}"
     rename_date_format = "%m-%d-%Y"
 
 
@@ -196,7 +196,7 @@ def test_clip_dest_rename_format():
         _RenameCfg(), deck, slot=2, original_name="clip_0002.mov",
         dest_root=Path("/nas/footage/2026-06-29/Deck1"), when=when, seq=3,
     )
-    assert dest.name == "06-29-2026 1 003.mov"
+    assert dest.name == "06-29-2026 1-2 003.mov"
     assert dest.parent == Path("/nas/footage/2026-06-29/Deck1")
 
 
@@ -205,7 +205,15 @@ def test_clip_dest_rename_preserves_extension():
     dest = ingest_mod._clip_dest(
         _RenameCfg(), deck, 1, "take.MP4", Path("/d"), datetime(2026, 1, 2), 10,
     )
-    assert dest.name == "01-02-2026 2 010.MP4"
+    assert dest.name == "01-02-2026 2-1 010.MP4"
+
+
+def test_clip_dest_rename_custom_pattern():
+    deck = DeckConfig(name="Deck1", host="h", number=1)
+    cfg = _RenameCfg()
+    cfg.rename_pattern = "{deck:02d}_slot{slot}_{seq:04d}"
+    dest = ingest_mod._clip_dest(cfg, deck, 2, "x.mov", Path("/d"), datetime(2026, 6, 29), 5)
+    assert dest.name == "01_slot2_0005.mov"
 
 
 def test_clip_dest_no_rename_uses_slot_subfolder():

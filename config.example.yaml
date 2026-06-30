@@ -65,7 +65,7 @@ hash:
 
 rename:
   enabled: false                   # flip to true to rename clips on the NAS
-  pattern: "{date} {deck} {seq:03d}"  # fields: {date} {deck} {seq}; -> e.g. 06-29-2026 1 001.mov
+  pattern: "{date} {deck}-{slot} {seq:03d}"  # {date}{deck}{slot}{seq} -> 06-29-2026 1-2 003.mov
   date_format: "%m-%d-%Y"          # how {date} is rendered
 
 log:

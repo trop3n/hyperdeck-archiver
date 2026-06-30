@@ -52,7 +52,7 @@ def _clip_dest(
 ) -> Path:
     if cfg.rename_enabled:
         date_str = when.strftime(cfg.rename_date_format)
-        stem = cfg.rename_pattern.format(date=date_str, deck=deck.number, seq=seq)
+        stem = cfg.rename_pattern.format(date=date_str, deck=deck.number, slot=slot, seq=seq)
         ext = os.path.splitext(original_name)[1]
         return dest_root / (stem + ext)
     return dest_root / f"slot{slot}" / original_name

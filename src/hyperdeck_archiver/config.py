@@ -146,7 +146,7 @@ def _build(raw: dict) -> Config:
         notify_on_failure=bool(notify.get("on_failure", True)),
         hash_algo=str(hashing.get("algo", "blake2b")),
         rename_enabled=bool(rename.get("enabled", False)),
-        rename_pattern=str(rename.get("pattern", "{date} {deck} {seq:03d}")),
+        rename_pattern=str(rename.get("pattern", "{date} {deck}-{slot} {seq:03d}")),
         rename_date_format=str(rename.get("date_format", "%m-%d-%Y")),
         log_file=Path(str(log.get("file", "logs/hyperdeck-archiver.log"))),
         log_level=str(log.get("level", "INFO")),

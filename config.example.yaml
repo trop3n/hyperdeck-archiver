@@ -24,15 +24,17 @@ decks:
   #   slots: [1, 2]
 
 nas:
-  # Where the SMB share is mounted on this host. Persistent auto-mount is
-  # recommended (macOS: autofs/Connect to Server; Pi/Linux: /etc/fstab).
-  #   macOS example: /Volumes/Footage
-  #   Linux/Pi example: /mnt/footage
-  mount_root: /Volumes/Footage
-  footage_root: footage            # dated folders live under mount_root/footage_root
-  share: footage
+  # The DSM shared folder (= SMB share) is "Video Archive" (a direct child of /volume1).
+  # Mount that share at `mount_root`, then `footage_root` is the subfolder inside it
+  # where dated folders land. On the NAS this resolves to:
+  #   /volume1/Video Archive/HyperDeck Backups/<YYYY-MM-DD>/DeckN/...
+  #   macOS:   mount_root: /Volumes/Video Archive
+  #   Linux/Pi: mount_root: /mnt/video-archive
+  mount_root: /mnt/video-archive
+  footage_root: "HyperDeck Backups"   # subfolder inside the share; spaces are fine
+  share: "Video Archive"              # DSM shared-folder name. NB: has a space
   smb_url: "smb://192.168.6.52"
-  min_free_gb: 200                 # abort ingest if NAS free space drops below this
+  min_free_gb: 200                    # abort ingest if NAS free space drops below this
 
 ingest:
   concurrency: 4                   # copy this many decks in parallel

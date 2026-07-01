@@ -61,14 +61,21 @@ sudo chmod 600 /etc/samba/.nas-creds
 sudo chown root:root /etc/samba/.nas-creds
 ```
 
-Add the mount (replace `footage` with your actual share name):
+Add the mount. **The share name `Video Archive` contains a space, so it MUST be
+escaped as `Video\040Archive` in `/etc/fstab`** — otherwise fstab treats the
+space as a field separator and the mount fails:
 
 ```bash
-sudo mkdir -p /mnt/footage
-echo '//192.168.6.52/footage  /mnt/footage  cifs  credentials=/etc/samba/.nas-creds,uid=$(id -u),gid=$(id -g),iocharset=utf8,vers=3.0,seal,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0' | sudo tee -a /etc/fstab
+sudo mkdir -p /mnt/video-archive
+echo '//192.168.6.52/Video\040Archive  /mnt/video-archive  cifs  credentials=/etc/samba/.nas-creds,uid=$(id -u),gid=$(id -g),iocharset=utf8,vers=3.0,seal,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0' | sudo tee -a /etc/fstab
 sudo mount -a
-ls -l /mnt/footage        # confirm it lists the share
+ls -l "/mnt/video-archive"            # confirm it lists the share contents
+ls -l "/mnt/video-archive/HyperDeck Backups"   # your target folder
 ```
+
+The archiver creates `HyperDeck Backups/<date>/DeckN/` automatically if missing.
+In `config.yaml` set `nas.mount_root: /mnt/video-archive` and
+`nas.footage_root: "HyperDeck Backups"`.
 
 `nofail` + `x-systemd.automount` mean the Pi will still boot if the NAS is down,
 and will mount the share on first access.

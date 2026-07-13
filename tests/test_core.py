@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -11,7 +14,7 @@ from hyperdeck_archiver import ingest as ingest_mod  # noqa: E402
 from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
 from hyperdeck_archiver.bmd_client import parse_slot_info, parse_token  # noqa: E402
-from hyperdeck_archiver.config import DeckConfig  # noqa: E402
+from hyperdeck_archiver.config import DeckConfig, load_config  # noqa: E402
 from hyperdeck_archiver.ftp_client import is_metadata, parse_list_line  # noqa: E402
 from hyperdeck_archiver.models import Clip, ClipResult, SlotResult  # noqa: E402
 
@@ -239,3 +242,302 @@ def test_max_seq_in_ignores_unrelated(tmp_path: Path):
     (tmp_path / "random.mov").write_bytes(b"")
     (tmp_path / "06-29-2026 1 005.mov").write_bytes(b"")
     assert ingest_mod._max_seq_in(tmp_path) == 5
+
+
+# ---- Config: deck number auto-derive + uniqueness validation ----
+
+def _write_cfg(tmp_path: Path, body: str) -> Path:
+    p = tmp_path / "config.yaml"
+    p.write_text(body)
+    return p
+
+
+def test_load_config_auto_derives_number_from_name(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck3
+    host: 10.0.0.3
+nas:
+  mount_root: /nas
+""",
+    )
+    cfg = load_config(p)
+    assert cfg.decks[0].number == 3
+
+
+def test_load_config_explicit_number_wins(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck3
+    host: 10.0.0.3
+    number: 99
+nas:
+  mount_root: /nas
+""",
+    )
+    cfg = load_config(p)
+    assert cfg.decks[0].number == 99
+
+
+def test_load_config_number_falls_back_to_position(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Alpha
+    host: 10.0.0.1
+  - name: Bravo
+    host: 10.0.0.2
+nas:
+  mount_root: /nas
+""",
+    )
+    cfg = load_config(p)
+    assert [d.number for d in cfg.decks] == [1, 2]
+
+
+def test_load_config_rejects_duplicate_deck_names(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck3
+    host: 10.0.0.3
+  - name: Deck3
+    host: 10.0.0.4
+nas:
+  mount_root: /nas
+""",
+    )
+    with pytest.raises(ValueError, match="duplicate deck name"):
+        load_config(p)
+
+
+def test_load_config_rejects_duplicate_deck_numbers(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck3
+    host: 10.0.0.3
+  - name: Other
+    host: 10.0.0.4
+    number: 3
+nas:
+  mount_root: /nas
+""",
+    )
+    with pytest.raises(ValueError, match="duplicate deck number"):
+        load_config(p)
+
+
+# ---- FTP connection resilience (reconnect on failure / per-slot boundary) ----
+#
+# Regression: a single timed-out download used to leave the shared FTP control
+# socket permanently unusable (ftplib: "cannot read from timed out object"), so
+# every later clip and the NEXT slot's listing failed spuriously. These tests pin
+# the contract that a dead connection is replaced before further use.
+
+class _FakeFtp:
+    """Stand-in FtpDeck that records control-connection lifecycle for assertions."""
+
+    def __init__(self, host="h"):
+        self.host = host
+        self.connects = 0
+        self.closes = 0
+        self.reconnects = 0
+        self.list_calls: list[int] = []
+        self.clips_by_slot: dict[int, list[Clip]] = {}
+        self.reconnect_raises = False
+
+    def connect(self):
+        self.connects += 1
+
+    def close(self):
+        self.closes += 1
+
+    def reconnect(self):
+        self.reconnects += 1
+        if self.reconnect_raises:
+            raise OSError("cannot read from timed out object")
+
+    def list_clips(self, slot, skip=()):
+        self.list_calls.append(slot)
+        return list(self.clips_by_slot.get(slot, []))
+
+
+class _FakeBmd:
+    def __init__(self, host="h", **kw):
+        self.host = host
+        self.connected = False
+        self.closed = False
+        self.formatted: list[int] = []
+
+    def connect(self):
+        self.connected = True
+
+    def close(self):
+        self.closed = True
+
+    def format_slot(self, slot, *a, **kw):
+        self.formatted.append(slot)
+        return True
+
+
+class _IngestCfg:
+    """Minimal Config surface exercised by _ingest_deck / _ingest_slot."""
+
+    skip_metadata = (".fseventsd", "._*")
+    hash_algo = "blake2b"
+    rename_enabled = False
+
+    def __init__(self, manifest_dir: Path):
+        self.manifest_dir = manifest_dir
+
+
+def _download_returning(results: dict[str, str]):
+    """Stub for transfer.download_and_verify keyed by clip name -> status."""
+
+    def _stub(deck, clip, dest_path, algo, logger=None):
+        return ClipResult(clip=clip, status=results.get(clip.name, "verified"),
+                          dest_path=str(dest_path))
+
+    return _stub
+
+
+def test_ingest_deck_reconnects_between_slots(tmp_path: Path, monkeypatch):
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: [Clip(2, 1, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", lambda host, **kw: _FakeBmd(host))
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    result = ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False,
+    )
+    # slot 1 uses the initial connect; exactly one reconnect happens before slot 2.
+    assert ftp.connects == 1
+    assert ftp.reconnects == 1
+    assert ftp.list_calls == [1, 2]
+    assert len(result.slots) == 2
+    assert all(s.clips[0].status == "verified" for s in result.slots)
+
+
+def test_ingest_slot_reconnects_after_failed_clip(tmp_path: Path, monkeypatch):
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10), Clip(1, 2, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify",
+                        _download_returning({"a.mov": "failed"}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, None, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False, max_clips=None, counter=[0],
+    )
+    # first clip failed -> one reconnect; second clip is still attempted on a fresh link.
+    assert ftp.reconnects == 1
+    assert len(sr.clips) == 2
+    assert sr.clips[0].status == "failed"
+    assert sr.clips[1].status == "verified"
+    assert sr.error == ""
+
+
+def test_ingest_slot_breaks_when_reconnect_fails(tmp_path: Path, monkeypatch):
+    ftp = _FakeFtp()
+    ftp.reconnect_raises = True
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10), Clip(1, 2, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify",
+                        _download_returning({"a.mov": "failed"}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, None, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False, max_clips=None, counter=[0],
+    )
+    # reconnect failed after the first clip -> stop; the second clip is never tried.
+    assert ftp.reconnects == 1
+    assert len(sr.clips) == 1
+    assert sr.clips[0].status == "failed"
+    assert sr.error.startswith("FTP connection lost")
+
+
+def test_ingest_deck_stops_when_reconnect_between_slots_fails(tmp_path: Path, monkeypatch):
+    ftp = _FakeFtp()
+    ftp.reconnect_raises = True
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: [Clip(2, 1, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", lambda host, **kw: _FakeBmd(host))
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    result = ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False,
+    )
+    # slot 1 processed; reconnect before slot 2 failed -> stop with a deck error.
+    assert ftp.reconnects == 1
+    assert len(result.slots) == 1
+    assert result.error.startswith("FTP reconnect failed before slot 2")
+
+
+def test_bmd_not_opened_when_not_clearing(tmp_path: Path, monkeypatch):
+    made = {"n": 0}
+
+    def make_bmd(host, **kw):
+        made["n"] += 1
+        return _FakeBmd(host)
+
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: []}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", make_bmd)
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False,
+    )
+    assert made["n"] == 0
+
+
+def test_bmd_opened_and_closed_when_clearing(tmp_path: Path, monkeypatch):
+    bmd = _FakeBmd("172.16.9.82")
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: []}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", lambda host, **kw: bmd)
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=True,
+    )
+    assert bmd.connected is True
+    assert bmd.closed is True
+    assert bmd.formatted == [1]

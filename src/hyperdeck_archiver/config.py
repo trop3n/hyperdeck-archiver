@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -89,6 +90,30 @@ def load_config(path: str | Path) -> Config:
     return _build(raw)
 
 
+def _derive_number(name: str, fallback: int) -> int:
+    """Deck number from trailing digits in name (e.g. Deck3 -> 3), else fallback."""
+    m = re.search(r"(\d+)\s*$", name)
+    return int(m.group(1)) if m else fallback
+
+
+def _validate_unique_decks(decks: list[DeckConfig]) -> None:
+    names = [d.name for d in decks]
+    dup_name = sorted({n for n in names if names.count(n) > 1})
+    if dup_name:
+        raise ValueError(
+            f"config: duplicate deck name(s) {dup_name}; deck names must be unique."
+        )
+    numbers = [d.number for d in decks]
+    dup_num = sorted({n for n in numbers if numbers.count(n) > 1})
+    if dup_num:
+        raise ValueError(
+            f"config: duplicate deck number(s) {dup_num}; each deck's 'number' must "
+            "be unique - it identifies the deck in renamed archive filenames. "
+            "Set 'number:' explicitly or use distinct trailing digits in deck names "
+            "(e.g. Deck3, Deck4, Deck5)."
+        )
+
+
 def _build(raw: dict) -> Config:
     decks_data = _require("decks", raw, "")
     decks: list[DeckConfig] = []
@@ -96,7 +121,7 @@ def _build(raw: dict) -> Config:
         name = _require("name", d, f"decks[{i}]")
         host = _require("host", d, f"decks[{i}]")
         slots = tuple(int(s) for s in d.get("slots", [1, 2]))
-        number = int(d.get("number", i + 1))
+        number = int(d["number"]) if "number" in d else _derive_number(str(name), i + 1)
         decks.append(
             DeckConfig(
                 name=str(name),
@@ -106,6 +131,8 @@ def _build(raw: dict) -> Config:
                 number=number,
             )
         )
+
+    _validate_unique_decks(decks)
 
     nas = _require("nas", raw, "")
     ingest = raw.get("ingest", {}) or {}

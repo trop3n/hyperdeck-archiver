@@ -57,6 +57,18 @@ class FtpDeck:
                     pass
             self._ftp = None
 
+    def reconnect(self) -> None:
+        """Replace the control connection with a fresh one.
+
+        A timed-out FTP control socket is permanently unusable: ftplib's internal
+        file object raises 'cannot read from timed out object' on every subsequent
+        read. Any transfer/list timeout MUST be followed by reconnect() before this
+        FtpDeck is reused, or the next operation will fail spuriously even though
+        the deck/slot itself is fine.
+        """
+        self.close()
+        self.connect()
+
     def __enter__(self) -> "FtpDeck":
         self.connect()
         return self

@@ -131,6 +131,18 @@ def _ingest_slot(
             manifest_mod.record_clip(mdata, deck.name, slot, entry)
             manifest_mod.save(cfg, date_str, mdata)
 
+        if cr.status == "failed":
+            # A failed download/size-query typically leaves the control socket
+            # poisoned ('cannot read from timed out object'). Reconnect so the
+            # next clip on this slot gets a clean connection instead of failing
+            # spuriously. If the reconnect itself fails the deck has likely hung.
+            try:
+                ftp.reconnect()
+            except Exception as e:  # noqa: BLE001
+                sr.error = f"FTP connection lost after failed clip {clip.name}: {e}"
+                log.error("[%s slot %d] %s", deck.name, slot, sr.error)
+                break
+
     _maybe_clear(cfg, deck, slot, bmd, sr, mdata, mlock, date_str, dry_run, do_clear)
     return sr
 
@@ -202,17 +214,29 @@ def _ingest_deck(
         return result
 
     bmd: BmdClient | None = None
-    try:
-        bmd = BmdClient(deck.host)
-        bmd.connect()
-    except Exception as e:  # noqa: BLE001
-        log.warning("[%s] BMD connect failed; slot status/format unavailable: %s", deck.name, e)
-        bmd = None
+    if do_clear and not dry_run:
+        try:
+            bmd = BmdClient(deck.host)
+            bmd.connect()
+        except Exception as e:  # noqa: BLE001
+            log.warning("[%s] BMD connect failed; slot status/format unavailable: %s", deck.name, e)
+            bmd = None
 
     dest_root.mkdir(parents=True, exist_ok=True)
     counter = [_max_seq_in(dest_root)] if cfg.rename_enabled else [0]
     try:
-        for slot in deck.slots:
+        for i, slot in enumerate(deck.slots):
+            # Fresh FTP control connection at each slot boundary. A timed-out
+            # transfer leaves the control socket permanently unusable (ftplib:
+            # 'cannot read from timed out object'); without this, a failure on an
+            # earlier slot would cascade into every later slot's clip listing.
+            if i > 0:
+                try:
+                    ftp.reconnect()
+                except Exception as e:  # noqa: BLE001
+                    result.error = f"FTP reconnect failed before slot {slot}: {e}"
+                    log.error("[%s] %s", deck.name, result.error)
+                    break
             result.slots.append(
                 _ingest_slot(
                     cfg,

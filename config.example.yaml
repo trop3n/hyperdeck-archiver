@@ -13,15 +13,22 @@ decks:
     enabled: true
     slots: [1, 2]
 
-  # Add the two Studio HD Pros here once you have their IPs:
-  # - name: Deck3
-  #   host: 172.16.9.83
-  #   enabled: false     # flip to true once reachable
-  #   slots: [1, 2]
-  # - name: Deck4
-  #   host: 172.16.9.84
-  #   enabled: false
-  #   slots: [1, 2]
+  # Pre-staged for the 3 new HyperDeck Minis (not yet racked/assigned IPs).
+  # `enabled: false` makes them no-ops today; on install day just replace the
+  # placeholder host and flip `enabled` to true. `number` auto-derives from the
+  # trailing digits in `name` (Deck3 -> 3), so you don't have to set it.
+  - name: Deck3
+    host: 172.16.9.83      # placeholder - replace once assigned
+    enabled: false
+    slots: [1, 2]
+  - name: Deck4
+    host: 172.16.9.84      # placeholder - replace once assigned
+    enabled: false
+    slots: [1, 2]
+  - name: Deck5
+    host: 172.16.9.85      # placeholder - replace once assigned
+    enabled: false
+    slots: [1, 2]
 
 nas:
   # The DSM shared folder (= SMB share) is "Video Archive" (a direct child of /volume1).
@@ -34,10 +41,14 @@ nas:
   footage_root: "HyperDeck Backups"   # subfolder inside the share; spaces are fine
   share: "Video Archive"              # DSM shared-folder name. NB: has a space
   smb_url: "smb://192.168.6.52"
-  min_free_gb: 200                    # abort ingest if NAS free space drops below this
+  min_free_gb: 1000                   # abort ingest if NAS free space drops below this.
+                                      # Size for >= one full weekly ingest: 5 decks *
+                                      # ~160 GB/deck ~= 800 GB/week, so 1000 GB headroom.
 
 ingest:
-  concurrency: 4                   # copy this many decks in parallel
+  concurrency: 6                   # max decks ingested in parallel. Set >= enabled-deck
+                                   # count so no deck serializes behind the others
+                                   # (5 decks planned -> 6 gives comfortable headroom).
   clear_cards: false               # SET true AFTER the first successful archive.
                                    # When true, a slot is BMD-formatted only after
                                    # every clip on it is downloaded + verified.

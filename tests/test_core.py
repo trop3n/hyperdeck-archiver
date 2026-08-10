@@ -1,6 +1,7 @@
 """Tests built from the real HyperDeck responses captured in step0/step0b logs."""
 from __future__ import annotations
 
+import ftplib
 import sys
 import threading
 from datetime import datetime
@@ -15,7 +16,7 @@ from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
 from hyperdeck_archiver.bmd_client import parse_slot_info, parse_token  # noqa: E402
 from hyperdeck_archiver.config import DeckConfig, load_config  # noqa: E402
-from hyperdeck_archiver.ftp_client import is_metadata, parse_list_line  # noqa: E402
+from hyperdeck_archiver.ftp_client import FtpDeck, is_metadata, parse_list_line  # noqa: E402
 from hyperdeck_archiver.models import Clip, ClipResult, SlotResult  # noqa: E402
 
 # ---- FTP LIST parsing (real lines from 172.16.9.81 / .82) ----
@@ -63,6 +64,31 @@ def test_metadata_filtering():
     assert is_metadata(".Spotlight-V100", pats)
     assert not is_metadata("Blackmagic HyperDeck Studio Mini_0000.mov", pats)
     assert is_metadata(".", pats)
+
+
+# ---- Empty slot (550 = no media) is normal, not an error ----
+
+def test_list_clips_empty_slot_returns_empty():
+    deck = FtpDeck("h")
+
+    class _Ftp:
+        def retrlines(self, cmd, cb):
+            raise ftplib.error_perm("550 Requested action not taken. File unavailable.")
+
+    deck._ftp = _Ftp()
+    assert deck.list_clips(1) == []
+
+
+def test_list_clips_non_550_error_perm_propagates():
+    deck = FtpDeck("h")
+
+    class _Ftp:
+        def retrlines(self, cmd, cb):
+            raise ftplib.error_perm("530 Not logged in.")
+
+    deck._ftp = _Ftp()
+    with pytest.raises(ftplib.error_perm):
+        deck.list_clips(1)
 
 
 # ---- BMD 9993 parsing (real slot-info + format token shapes) ----

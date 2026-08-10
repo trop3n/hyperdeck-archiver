@@ -84,7 +84,14 @@ class FtpDeck:
     def list_clips(self, slot: int, skip_metadata: tuple[str, ...] = ()) -> list[Clip]:
         ftp = self._require()
         lines: list[str] = []
-        ftp.retrlines(f"LIST /{slot}", lines.append)
+        try:
+            ftp.retrlines(f"LIST /{slot}", lines.append)
+        except ftplib.error_perm as e:
+            # 550 on LIST /<slot> means no media is mounted there — a normal
+            # HyperDeck state (not every slot is populated), so treat as empty.
+            if "550" in str(e):
+                return []
+            raise
         clips: list[Clip] = []
         clip_id = 0
         for line in lines:

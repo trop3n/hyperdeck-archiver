@@ -17,16 +17,22 @@ decks:
   # `enabled: false` makes them no-ops today; on install day just replace the
   # placeholder host and flip `enabled` to true. `number` auto-derives from the
   # trailing digits in `name` (Deck3 -> 3), so you don't have to set it.
+  # These decks expose FTP slot dirs as /sd1, /sd2 (the Studio HD Mini above
+  # uses bare /1, /2), so set `slot_path: "sd{}"` — the {} is filled with the
+  # slot id. Omit slot_path to get the legacy default ("{}" -> /1, /2).
   - name: Deck3
     host: 172.16.9.83      # placeholder - replace once assigned
+    slot_path: "sd{}"
     enabled: false
     slots: [1, 2]
   - name: Deck4
     host: 172.16.9.84      # placeholder - replace once assigned
+    slot_path: "sd{}"
     enabled: false
     slots: [1, 2]
   - name: Deck5
     host: 172.16.9.85      # placeholder - replace once assigned
+    slot_path: "sd{}"
     enabled: false
     slots: [1, 2]
 

@@ -22,6 +22,7 @@ class DeckConfig:
     enabled: bool = True
     slots: tuple[int, ...] = (1, 2)
     number: int = 1
+    slot_path: str = "{}"
 
 
 @dataclass(frozen=True)
@@ -129,6 +130,7 @@ def _build(raw: dict) -> Config:
                 enabled=bool(d.get("enabled", True)),
                 slots=slots,
                 number=number,
+                slot_path=str(d.get("slot_path", "{}")),
             )
         )
 

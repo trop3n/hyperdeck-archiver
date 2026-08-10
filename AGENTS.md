@@ -51,6 +51,11 @@ Each HyperDeck speaks **two protocols** — don't conflate them:
 - BMD 9993 TCP control (`bmd_client.py`) — slot info + `format prepare/confirm`,
   used only to clear a card after its clips verify.
 
+FTP slot directory names are **model-dependent**: the Studio HD Mini exposes
+`/1`/`/2`, newer decks expose `/sd1`/`/sd2`. Set per-deck `slot_path` (a `{}`
+template filled with the slot id) in config; default `"{}"` gives the legacy
+`/1`/`/2`. BMD slot ids stay numeric regardless of model.
+
 State/resumability lives in `manifest.py`: a JSON file per date under
 `<footage_dir>/.hyperdeck-archiver/`. Re-runs skip verified clips and retry
 failed ones automatically; `slot_cleared` is tracked per slot.

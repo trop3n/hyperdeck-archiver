@@ -206,7 +206,7 @@ def _ingest_deck(
 ) -> DeckResult:
     result = DeckResult(deck=deck.name, host=deck.host)
     try:
-        ftp = FtpDeck(deck.host)
+        ftp = FtpDeck(deck.host, slot_path=deck.slot_path)
         ftp.connect()
     except Exception as e:  # noqa: BLE001
         result.error = f"FTP connect failed: {e}"

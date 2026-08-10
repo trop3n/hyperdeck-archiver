@@ -40,7 +40,7 @@ def _cmd_probe(cfg, log: logging.Logger) -> int:
         print(f"\n=== {deck.name} ({deck.host}) ===")
         ftp_ok = clips = bmd_ok = None
         try:
-            with FtpDeck(deck.host) as ftp:
+            with FtpDeck(deck.host, slot_path=deck.slot_path) as ftp:
                 total = 0
                 count = 0
                 for slot in deck.slots:

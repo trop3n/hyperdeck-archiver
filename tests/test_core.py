@@ -91,6 +91,34 @@ def test_list_clips_non_550_error_perm_propagates():
         deck.list_clips(1)
 
 
+# ---- slot_path template maps logical slot id -> FTP dir name ----
+
+def test_list_clips_uses_slot_path_template():
+    deck = FtpDeck("h", slot_path="sd{}")
+    seen: list[str] = []
+
+    class _Ftp:
+        def retrlines(self, cmd, cb):
+            seen.append(cmd)
+
+    deck._ftp = _Ftp()
+    deck.list_clips(2)
+    assert seen == ["LIST /sd2"]
+
+
+def test_list_clips_default_slot_path_is_bare_number():
+    deck = FtpDeck("h")
+    seen: list[str] = []
+
+    class _Ftp:
+        def retrlines(self, cmd, cb):
+            seen.append(cmd)
+
+    deck._ftp = _Ftp()
+    deck.list_clips(1)
+    assert seen == ["LIST /1"]
+
+
 # ---- BMD 9993 parsing (real slot-info + format token shapes) ----
 
 SLOT_INFO_LINES = [

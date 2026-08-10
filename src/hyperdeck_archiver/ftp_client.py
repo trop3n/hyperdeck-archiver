@@ -35,10 +35,15 @@ def is_metadata(name: str, skip_patterns: tuple[str, ...]) -> bool:
 
 
 class FtpDeck:
-    def __init__(self, host: str, timeout: float = 30.0):
+    def __init__(self, host: str, timeout: float = 30.0, slot_path: str = "{}"):
         self.host = host
         self.timeout = timeout
+        self.slot_path = slot_path
         self._ftp: ftplib.FTP | None = None
+
+    def _slot_root(self, slot: int) -> str:
+        """FTP directory name for a logical slot id, e.g. '2' or 'sd2'."""
+        return self.slot_path.format(slot)
 
     def connect(self) -> None:
         self._ftp = ftplib.FTP()
@@ -85,7 +90,7 @@ class FtpDeck:
         ftp = self._require()
         lines: list[str] = []
         try:
-            ftp.retrlines(f"LIST /{slot}", lines.append)
+            ftp.retrlines(f"LIST /{self._slot_root(slot)}", lines.append)
         except ftplib.error_perm as e:
             # 550 on LIST /<slot> means no media is mounted there — a normal
             # HyperDeck state (not every slot is populated), so treat as empty.
@@ -107,7 +112,7 @@ class FtpDeck:
 
     def size(self, slot: int, name: str) -> int:
         ftp = self._require()
-        return int(ftp.size(f"/{slot}/{name}"))
+        return int(ftp.size(f"/{self._slot_root(slot)}/{name}"))
 
     def download(self, slot: int, name: str, dest_path: str, hasher, progress=None) -> int:
         """Stream RETR /<slot>/<name> to dest_path, updating `hasher` per chunk.
@@ -115,7 +120,7 @@ class FtpDeck:
         Returns bytes written. `progress(written)` is called per chunk if given.
         """
         ftp = self._require()
-        remote = f"/{slot}/{name}"
+        remote = f"/{self._slot_root(slot)}/{name}"
         sock = ftp.transfercmd("RETR " + remote)
         total = 0
         try:

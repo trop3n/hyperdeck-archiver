@@ -15,5 +15,12 @@ __pycache__/
 .venv/
 venv/
 
+# Tool caches (pytest/ruff self-ignore via inner .gitignore; explicit is robust)
+.pytest_cache/
+.ruff_cache/
+
+# Transient session notes (not part of the shipped project)
+HANDOFF.md
+
 # OS
 .DS_Store

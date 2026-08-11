@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 from datetime import datetime
 
@@ -10,6 +11,7 @@ from . import ingest, prune
 from .bmd_client import BmdClient
 from .config import load_config
 from .ftp_client import FtpDeck
+from .nas import ensure_mount, free_space_gb
 from .notifier import send_summary
 from .util import human_bytes, setup_logging
 
@@ -32,6 +34,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_prune.add_argument("--retention-days", type=int, help="Override retention.days")
 
     sub.add_parser("probe", help="Read-only reachability check of configured decks")
+    sub.add_parser("space", help="Show measured NAS free space vs min_free_gb (read-only)")
     return parser
 
 
@@ -61,6 +64,34 @@ def _cmd_probe(cfg, log: logging.Logger) -> int:
         print(f"  BMD : {'OK' if bmd_ok else 'FAIL'} (9993)")
         log.info("probe %s ftp=%s bmd=%s clips=%s", deck.host, ftp_ok, bmd_ok, clips)
     return 0
+
+
+def _cmd_space(cfg, log: logging.Logger) -> int:
+    print(f"mount_root : {cfg.mount_root}")
+    print(f"footage_dir: {cfg.footage_dir}")
+    try:
+        footage_dir = ensure_mount(cfg.mount_root, cfg.footage_root)
+    except Exception as e:  # noqa: BLE001
+        print(f"  NAS not ready: {e}")
+        log.error("space check: NAS not ready: %s", e)
+        return 1
+
+    free_gb = free_space_gb(footage_dir)
+    try:
+        du = shutil.disk_usage(str(footage_dir))
+        print(f"volume     : {du.used / 1e9:.1f} used / {du.total / 1e9:.1f} total GB")
+    except OSError:
+        pass
+    print(f"free space : {free_gb:.1f} GB" if free_gb >= 0 else "free space : <unavailable>")
+    print(f"min_free_gb: {cfg.min_free_gb} GB  (ingest aborts below this)")
+
+    if free_gb < 0:
+        print("gate       : SKIP (free space unmeasurable; ingest skips the gate too)")
+        return 0
+    ok = free_gb >= cfg.min_free_gb
+    print(f"gate       : {'PASS' if ok else 'FAIL'} (free {'>=' if ok else '<'} min_free_gb)")
+    log.info("space check: free=%.1f GB min=%d GB pass=%s", free_gb, cfg.min_free_gb, ok)
+    return 0 if ok else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,6 +124,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "probe":
         return _cmd_probe(cfg, log)
+
+    if args.command == "space":
+        return _cmd_space(cfg, log)
 
     return 2
 

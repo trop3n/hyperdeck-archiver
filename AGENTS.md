@@ -18,7 +18,8 @@ Before any command works, copy `config.example.yaml` → `config.yaml` and
 (`config.py:load_config`) reads `.env` from the **config file's parent dir**, so
 keep `.env` next to `config.yaml`.
 
-CLI subcommands (`cli.py`): `ingest`, `prune`, `probe`. Global flags:
+CLI subcommands (`cli.py`): `ingest`, `prune`, `probe`, `space` (NAS free-space
+preflight vs `min_free_gb`). Global flags:
 `--config` (default `config.yaml`), `--dry-run`. `ingest` also takes `--no-clear`,
 `--deck <name>` (repeatable), `--limit N` (smoke-test cap), `--date YYYY-MM-DD`.
 

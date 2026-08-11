@@ -1,12 +1,19 @@
 """NAS-side helpers: mount preflight, free-space, and dated-folder pruning."""
 from __future__ import annotations
 
+import re
 import shutil
+import subprocess
 import tempfile
 from datetime import datetime
 from pathlib import Path
 
 DATE_FORMAT = "%Y-%m-%d"
+
+# df -Pk data line: <filesystem> <1K-blocks> <used> <avail> <capacity>% <mount point>.
+# Anchored on the '%' so a filesystem/mount name containing spaces or digits
+# (e.g. '//user@host/Video%20Archive ... /Volumes/Video Archive') can't shift it.
+_DF_RE = re.compile(r"\s(\d+)\s+(\d+)\s+(\d+)\s+\d+%\s")
 
 
 class NasError(RuntimeError):
@@ -36,11 +43,43 @@ def _assert_writable(path: Path) -> None:
         ) from e
 
 
-def free_space_gb(path: Path) -> float:
+def parse_df(output: str) -> tuple[int, int, int] | None:
+    """(total, used, free) bytes from `df -Pk` output, or None if unparseable."""
+    lines = [ln for ln in output.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return None
+    m = _DF_RE.search(lines[-1])
+    if not m:
+        return None
+    total, used, free = (int(g) * 1024 for g in m.groups())
+    return total, used, free
+
+
+def disk_usage(path: Path) -> tuple[int, int, int] | None:
+    """(total, used, free) bytes for the filesystem holding `path`; None if unmeasurable.
+
+    Uses df(1), not shutil.disk_usage. macOS statvfs() truncates its block counts
+    to 32 bits, so on a share larger than 2**32 * f_frsize bytes the numbers wrap:
+    the 35 TiB Synology share read back as 3.1 TB total / 324 GB free, which
+    false-tripped the min_free_gb gate. df(1) reads statfs(), whose counts are
+    64-bit, and agrees with what DSM reports.
+    """
     try:
-        return shutil.disk_usage(str(path)).free / 1e9
-    except OSError:
-        return -1.0
+        proc = subprocess.run(
+            ["df", "-Pk", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return parse_df(proc.stdout)
+
+
+def free_space_gb(path: Path) -> float:
+    usage = disk_usage(path)
+    return -1.0 if usage is None else usage[2] / 1e9
 
 
 def list_date_folders(footage_dir: Path) -> list[tuple[str, Path]]:

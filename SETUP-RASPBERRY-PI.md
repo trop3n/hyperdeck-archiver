@@ -1,4 +1,12 @@
-# Deploy on Raspberry Pi 5 (8 GB)
+# Deploy on Raspberry Pi 5 (8 GB) — Linux reference
+
+> **Not current production.** Production moved to a macOS iMac in 2026-08
+> (`Sanctuary-VPR-Utility-iMac-2018`, repo at `~/Dev/hyperdeck-archiver`,
+> launchd scheduler, SMB share at `/Volumes/Video Archive`). See `HANDOFF.md`
+> for the production host's known state, and the Deploy section of `AGENTS.md`.
+> A full macOS setup guide is TBD. This doc is kept current as the Linux/Pi
+> alternative-target reference. Code is host-agnostic — only `nas.mount_root`
+> and the scheduler choice differ.
 
 A Pi 5 is a good always-on host for this: pure-Python, streams in 256 KB chunks
 (footage never touches the Pi's SD card), and the HyperDecks - not the Pi - are

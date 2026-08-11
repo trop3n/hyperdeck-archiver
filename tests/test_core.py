@@ -173,6 +173,41 @@ def test_select_prune_targets_empty(tmp_path: Path):
     assert nas.select_prune_targets(tmp_path, 30) == []
 
 
+# ---- df parsing (free-space gate) ----
+
+# Real output from the production iMac against the Synology share. Both the
+# filesystem name and the mount point contain characters that trip naive
+# column splitting ('%20', and a literal space in '/Volumes/Video Archive').
+_DF_IMAC = (
+    "Filesystem                           1024-blocks        Used   Available "
+    "Capacity  Mounted on\n"
+    "//JKimm@192.168.6.52/Video%20Archive 37460008960 11374195712 26085813248 "
+    "     31%  /Volumes/Video Archive\n"
+)
+
+
+def test_parse_df_handles_spaces_in_mount_point():
+    total, used, free = nas.parse_df(_DF_IMAC)
+    assert total == 37460008960 * 1024
+    assert used == 11374195712 * 1024
+    assert free == 26085813248 * 1024
+
+
+def test_parse_df_free_space_exceeds_statvfs_32bit_wrap():
+    """The share is 34.9 TiB; macOS statvfs wrapped it to 3.1 TB and false-tripped
+    the min_free_gb gate. df must report the full 24 TiB free."""
+    _, _, free = nas.parse_df(_DF_IMAC)
+    assert free / 1e9 > 26_000  # GB, vs the 323.9 GB statvfs reported
+
+
+def test_parse_df_rejects_header_only():
+    assert nas.parse_df("Filesystem 1024-blocks Used Available Capacity Mounted on\n") is None
+
+
+def test_parse_df_rejects_garbage():
+    assert nas.parse_df("df: /nope: No such file or directory\n") is None
+
+
 # ---- Manifest round-trip (resumability) ----
 
 class _Cfg:

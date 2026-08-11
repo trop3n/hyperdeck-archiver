@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
 import sys
 from datetime import datetime
 
@@ -11,7 +10,7 @@ from . import ingest, prune
 from .bmd_client import BmdClient
 from .config import load_config
 from .ftp_client import FtpDeck
-from .nas import ensure_mount, free_space_gb
+from .nas import disk_usage, ensure_mount
 from .notifier import send_summary
 from .util import human_bytes, setup_logging
 
@@ -76,12 +75,10 @@ def _cmd_space(cfg, log: logging.Logger) -> int:
         log.error("space check: NAS not ready: %s", e)
         return 1
 
-    free_gb = free_space_gb(footage_dir)
-    try:
-        du = shutil.disk_usage(str(footage_dir))
-        print(f"volume     : {du.used / 1e9:.1f} used / {du.total / 1e9:.1f} total GB")
-    except OSError:
-        pass
+    usage = disk_usage(footage_dir)
+    free_gb = -1.0 if usage is None else usage[2] / 1e9
+    if usage is not None:
+        print(f"volume     : {usage[1] / 1e9:.1f} used / {usage[0] / 1e9:.1f} total GB")
     print(f"free space : {free_gb:.1f} GB" if free_gb >= 0 else "free space : <unavailable>")
     print(f"min_free_gb: {cfg.min_free_gb} GB  (ingest aborts below this)")
 

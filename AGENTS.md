@@ -1,7 +1,8 @@
 # AGENTS.md
 
 Notes for OpenCode sessions working in this repo. `README.md` is empty; the real
-docs are `config.example.yaml` (heavily commented) and `SETUP-RASPBERRY-PI.md`.
+docs are `config.example.yaml` (heavily commented) and `SETUP-RASPBERRY-PI.md`
+(Linux/Pi reference — production is now a macOS iMac; see Deploy below).
 
 ## Run / dev entrypoint
 
@@ -76,11 +77,21 @@ failed ones automatically; `slot_cleared` is tracked per slot.
 - `xxhash` is optional (`pip install xxhash` or the `[fast]` extra); set
   `hash.algo: xxhash` in config. Default is stdlib `blake2b`.
 - Logs write to `logs/hyperdeck-archiver.log` (`logs/` is gitignored).
+- **Don't use `shutil.disk_usage` for NAS free space** — use `nas.disk_usage()`,
+  which shells out to `df -Pk`. macOS `statvfs()` truncates block counts to
+  32 bits, so `shutil` wraps every `2**32 * f_frsize` bytes and reported the
+  34.9 TiB share as 3.1 TB, false-tripping the `min_free_gb` gate.
 
 ## Deploy (reference, don't reproduce)
 
-Production target is a Raspberry Pi 5. `schedulers/` ships templated units
-(`@@INSTALL_DIR@@`, `@@VENV_PYTHON@@`, `@@USER@@`) for both systemd (Pi) and
-launchd (Mac). Full install/mount steps — including the `Video Archive` SMB
-share's `\040` fstab escape — are in `SETUP-RASPBERRY-PI.md`. Code is identical
-across hosts; only `nas.mount_root` and the scheduler choice differ.
+Production is a macOS iMac (`Sanctuary-VPR-Utility-iMac-2018`, repo at
+`~/Dev/hyperdeck-archiver`, venv at `.venv/`, SMB share mounted at
+`/Volumes/Video Archive`, scheduler is **launchd**). A full macOS setup doc is
+TBD; the known production state is recorded in `HANDOFF.md`.
+
+`SETUP-RASPBERRY-PI.md` is the **Linux/Pi reference** for that alternative
+target (apt / `cifs-utils` / `/etc/fstab` / systemd) — not current production,
+but kept current in case of a future host move. `schedulers/` ships templated
+units (`@@INSTALL_DIR@@`, `@@VENV_PYTHON@@`, `@@USER@@`) for both systemd and
+launchd. Code is identical across hosts; only `nas.mount_root` and the
+scheduler choice differ.

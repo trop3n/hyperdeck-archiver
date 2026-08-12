@@ -278,7 +278,7 @@ def run(
     do_clear = cfg.clear_cards and not no_clear
 
     try:
-        footage_dir = ensure_mount(cfg.mount_root, cfg.footage_root)
+        footage_dir = ensure_mount(cfg.mount_root, cfg.footage_root, cfg.require_mount)
     except Exception as e:  # noqa: BLE001
         summary.error = f"NAS not ready: {e}"
         summary.finished_at = datetime.now()

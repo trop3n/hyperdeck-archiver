@@ -69,6 +69,11 @@ failed ones automatically; `slot_cleared` is tracked per slot.
   hash-verified. Never flip on without a clean full run first.
 - `prune` deletes whole NAS date-folders older than `retention.days`. Test with
   `--dry-run` first.
+- `ensure_mount` refuses to run unless `mount_root` is a real mount point
+  (`nas.require_mount`, default true). An unmounted share leaves a plain
+  directory behind that is indistinguishable from a mounted one, and the
+  `mkdir` would then build the archive on the local disk. Dev configs pointing
+  at a local folder must set `require_mount: false`.
 
 ## Dependencies / quirks
 

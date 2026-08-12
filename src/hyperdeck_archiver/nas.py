@@ -1,6 +1,7 @@
 """NAS-side helpers: mount preflight, free-space, and dated-folder pruning."""
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -20,12 +21,24 @@ class NasError(RuntimeError):
     pass
 
 
-def ensure_mount(mount_root: Path, footage_root: str) -> Path:
+def ensure_mount(mount_root: Path, footage_root: str, require_mount: bool = True) -> Path:
     footage_dir = mount_root / footage_root
     if not mount_root.exists():
         raise NasError(
             f"NAS mount point {mount_root} does not exist. Mount the share first "
             f"(macOS autofs or Connect to Server; Linux /etc/fstab)."
+        )
+    # Existence alone is not enough: an empty directory left behind at the mount
+    # point looks identical to a mounted share, and the mkdir below would then
+    # silently build the archive on the local disk. macOS makes this easy to hit
+    # — a stray dir here diverts the real mount to '<name>-1'.
+    if require_mount and not os.path.ismount(mount_root):
+        raise NasError(
+            f"{mount_root} exists but is not a mount point — the share is not "
+            f"mounted there. Refusing to continue: footage would be written to the "
+            f"local disk instead of the NAS. Mount the share (check for a stray "
+            f"'{mount_root.name}-1' mount alongside it), or set "
+            f"'nas.require_mount: false' if this path is deliberately local."
         )
     footage_dir.mkdir(parents=True, exist_ok=True)
     _assert_writable(footage_dir)

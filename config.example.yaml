@@ -50,6 +50,15 @@ nas:
   min_free_gb: 1000                   # abort ingest if NAS free space drops below this.
                                       # Size for >= one full weekly ingest: 5 decks *
                                       # ~160 GB/deck ~= 800 GB/week, so 1000 GB headroom.
+                                      # Check the live value first: this is a hard gate,
+                                      # and a threshold above the share's usual free
+                                      # space blocks every run.
+  require_mount: true                 # refuse to run unless mount_root is a real mount
+                                      # point. Without this, an unmounted share leaves a
+                                      # plain directory behind and the whole archive gets
+                                      # written to the local disk instead. Set false only
+                                      # if mount_root is deliberately a local folder
+                                      # (e.g. a dev machine with no NAS).
 
 ingest:
   concurrency: 6                   # max decks ingested in parallel. Set >= enabled-deck

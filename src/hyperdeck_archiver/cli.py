@@ -69,7 +69,7 @@ def _cmd_space(cfg, log: logging.Logger) -> int:
     print(f"mount_root : {cfg.mount_root}")
     print(f"footage_dir: {cfg.footage_dir}")
     try:
-        footage_dir = ensure_mount(cfg.mount_root, cfg.footage_root)
+        footage_dir = ensure_mount(cfg.mount_root, cfg.footage_root, cfg.require_mount)
     except Exception as e:  # noqa: BLE001
         print(f"  NAS not ready: {e}")
         log.error("space check: NAS not ready: %s", e)

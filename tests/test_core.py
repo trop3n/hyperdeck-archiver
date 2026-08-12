@@ -208,6 +208,32 @@ def test_parse_df_rejects_garbage():
     assert nas.parse_df("df: /nope: No such file or directory\n") is None
 
 
+# ---- ensure_mount: refuse to archive onto the local disk ----
+
+def test_ensure_mount_rejects_unmounted_dir(tmp_path: Path):
+    """A leftover dir at the mount point must not be mistaken for the share."""
+    with pytest.raises(nas.NasError, match="not a mount point"):
+        nas.ensure_mount(tmp_path, "HyperDeck Backups")
+
+
+def test_ensure_mount_creates_nothing_when_unmounted(tmp_path: Path):
+    """The refusal must land before the mkdir — otherwise footage lands locally."""
+    with pytest.raises(nas.NasError):
+        nas.ensure_mount(tmp_path, "HyperDeck Backups")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ensure_mount_allows_local_path_when_not_required(tmp_path: Path):
+    footage_dir = nas.ensure_mount(tmp_path, "HyperDeck Backups", require_mount=False)
+    assert footage_dir == tmp_path / "HyperDeck Backups"
+    assert footage_dir.is_dir()
+
+
+def test_ensure_mount_missing_mount_root(tmp_path: Path):
+    with pytest.raises(nas.NasError, match="does not exist"):
+        nas.ensure_mount(tmp_path / "absent", "HyperDeck Backups")
+
+
 # ---- Manifest round-trip (resumability) ----
 
 class _Cfg:
@@ -339,6 +365,35 @@ def _write_cfg(tmp_path: Path, body: str) -> Path:
     p = tmp_path / "config.yaml"
     p.write_text(body)
     return p
+
+
+def test_load_config_require_mount_defaults_true(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck1
+    host: 10.0.0.1
+nas:
+  mount_root: /nas
+""",
+    )
+    assert load_config(p).require_mount is True
+
+
+def test_load_config_require_mount_opt_out(tmp_path: Path):
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck1
+    host: 10.0.0.1
+nas:
+  mount_root: /nas
+  require_mount: false
+""",
+    )
+    assert load_config(p).require_mount is False
 
 
 def test_load_config_auto_derives_number_from_name(tmp_path: Path):

@@ -53,13 +53,21 @@ class FtpDeck:
 
     def close(self) -> None:
         if self._ftp is not None:
+            # QUIT needs a live control socket. A connect() that fails part-way
+            # leaves an FTP object whose sock is None, and ftplib's quit() then
+            # raises AttributeError ("'NoneType' object has no attribute
+            # 'sendall'") — which ftplib.all_errors does not cover, so it escaped
+            # close(), escaped _ingest_deck's finally, and surfaced as "worker
+            # crashed", hiding the real reason the deck dropped out.
             try:
-                self._ftp.quit()
+                if self._ftp.sock is not None:
+                    self._ftp.quit()
             except ftplib.all_errors:
-                try:
-                    self._ftp.close()
-                except OSError:
-                    pass
+                pass
+            try:
+                self._ftp.close()
+            except OSError:
+                pass
             self._ftp = None
 
     def reconnect(self) -> None:

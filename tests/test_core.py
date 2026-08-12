@@ -486,6 +486,17 @@ nas:
 # every later clip and the NEXT slot's listing failed spuriously. These tests pin
 # the contract that a dead connection is replaced before further use.
 
+def test_close_survives_half_open_control_connection():
+    """Regression: a connect() that fails part-way leaves an ftplib.FTP with
+    sock=None. quit() then raises AttributeError, which ftplib.all_errors does
+    not cover, so close() blew up inside _ingest_deck's finally and the deck was
+    reported as 'worker crashed' instead of naming the real failure."""
+    deck = FtpDeck("h")
+    deck._ftp = ftplib.FTP()  # constructed but never connected: sock is None
+    deck.close()
+    assert deck._ftp is None
+
+
 class _FakeFtp:
     """Stand-in FtpDeck that records control-connection lifecycle for assertions."""
 

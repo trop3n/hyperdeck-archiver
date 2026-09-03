@@ -5,6 +5,7 @@ logs/
 # Secrets
 .env
 .env.*
+!.env.example
 
 # Local config (site-specific; copy from config.example.yaml)
 config.yaml

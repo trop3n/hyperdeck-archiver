@@ -71,11 +71,16 @@ sudo chown root:root /etc/samba/.nas-creds
 
 Add the mount. **The share name `Video Archive` contains a space, so it MUST be
 escaped as `Video\040Archive` in `/etc/fstab`** — otherwise fstab treats the
-space as a field separator and the mount fails:
+space as a field separator and the mount fails. Run this in `bash`: the
+heredoc is unquoted so `$(id -u)`/`$(id -g)` expand, while `\\040` survives as a
+literal `\040`. A single-quoted `echo` would write `$(id -u)` verbatim and
+`mount.cifs` would reject it.
 
 ```bash
 sudo mkdir -p /mnt/video-archive
-echo '//192.168.6.52/Video\040Archive  /mnt/video-archive  cifs  credentials=/etc/samba/.nas-creds,uid=$(id -u),gid=$(id -g),iocharset=utf8,vers=3.0,seal,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0' | sudo tee -a /etc/fstab
+sudo tee -a /etc/fstab >/dev/null <<EOF
+//192.168.6.52/Video\\040Archive  /mnt/video-archive  cifs  credentials=/etc/samba/.nas-creds,uid=$(id -u),gid=$(id -g),iocharset=utf8,vers=3.0,seal,nofail,x-systemd.automount,x-systemd.idle-timeout=60  0  0
+EOF
 sudo mount -a
 ls -l "/mnt/video-archive"            # confirm it lists the share contents
 ls -l "/mnt/video-archive/HyperDeck Backups"   # your target folder

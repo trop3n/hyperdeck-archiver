@@ -332,6 +332,10 @@ def run(
                 )
 
     with mlock:
-        manifest_mod.save(cfg, date_str, mdata)
+        try:
+            manifest_mod.save(cfg, date_str, mdata)
+        except OSError as e:
+            summary.error = f"final manifest save failed (NAS unreachable?): {e}"
+            log.error(summary.error)
     summary.finished_at = datetime.now()
     return summary

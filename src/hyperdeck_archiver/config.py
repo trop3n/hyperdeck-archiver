@@ -22,7 +22,6 @@ class DeckConfig:
     enabled: bool = True
     slots: tuple[int, ...] = (1, 2)
     number: int = 1
-    slot_path: str = "{}"
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,6 @@ class Config:
     share: str
     smb_url: str
     min_free_gb: int
-    require_mount: bool
     concurrency: int
     clear_cards: bool
     date_folder_format: str
@@ -131,7 +129,6 @@ def _build(raw: dict) -> Config:
                 enabled=bool(d.get("enabled", True)),
                 slots=slots,
                 number=number,
-                slot_path=str(d.get("slot_path", "{}")),
             )
         )
 
@@ -157,7 +154,6 @@ def _build(raw: dict) -> Config:
         share=str(nas.get("share", "")),
         smb_url=str(nas.get("smb_url", "")),
         min_free_gb=int(nas.get("min_free_gb", 100)),
-        require_mount=bool(nas.get("require_mount", True)),
         concurrency=int(ingest.get("concurrency", 4)),
         clear_cards=bool(ingest.get("clear_cards", False)),
         date_folder_format=str(ingest.get("date_folder_format", "%Y-%m-%d")),

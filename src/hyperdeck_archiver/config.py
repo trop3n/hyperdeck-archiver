@@ -162,7 +162,7 @@ def _build(raw: dict) -> Config:
         clear_cards=bool(ingest.get("clear_cards", False)),
         date_folder_format=str(ingest.get("date_folder_format", "%Y-%m-%d")),
         skip_metadata=tuple(
-            ingest.get("skip_metadata", [".fseventsd", ".Spotlight-V100", ".Trashes", "._"])
+            ingest.get("skip_metadata", [".fseventsd", ".Spotlight-V100", ".Trashes", "._*"])
         ),
         retention_enabled=bool(retention.get("enabled", True)),
         retention_days=int(retention.get("days", 30)),

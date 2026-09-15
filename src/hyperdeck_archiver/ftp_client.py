@@ -7,6 +7,7 @@ module lists clips and streams them to disk while hashing in one pass.
 from __future__ import annotations
 
 import ftplib
+import re
 from contextlib import contextmanager
 from fnmatch import fnmatch
 
@@ -17,12 +18,19 @@ class FtpError(RuntimeError):
     pass
 
 
+# perms links owner group size month day time|year, then ONE space, then the name.
+# Columns before the name may be padded (the Studio HD Mini right-aligns the year),
+# but the name is taken verbatim: a deck recorded a clip named " .mov", and splitting
+# on whitespace turned it into ".mov", which the deck then 550s on every SIZE/RETR.
+_LIST_RE = re.compile(r"^(\S+)\s+\S+\s+\S+\s+\S+\s+(\S+)\s+\S+\s+\S+\s+\S+ (.+)$")
+
+
 def parse_list_line(line: str) -> tuple[str, bool, int | None, str] | None:
     """Parse a UNIX-style LIST line -> (name, is_dir, size, perms) or None."""
-    parts = line.split(None, 8)
-    if len(parts) < 9:
+    m = _LIST_RE.match(line)
+    if not m:
         return None
-    perms, size_s, name = parts[0], parts[4], parts[8]
+    perms, size_s, name = m.groups()
     is_dir = perms.startswith("d")
     size = int(size_s) if size_s.isdigit() else None
     return name, is_dir, size, perms

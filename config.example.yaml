@@ -68,8 +68,9 @@ ingest:
                                    # When true, a slot is BMD-formatted only after
                                    # every clip on it is downloaded + verified.
   date_folder_format: "%Y-%m-%d"
-  # Per-slot folders ignore these macOS/Spotlight metadata entries:
-  skip_metadata: [".fseventsd", ".Spotlight-V100", ".Trashes", "._"]
+  # Per-slot folders ignore these macOS/Spotlight metadata entries (shell-style globs;
+  # "._*" matches macOS AppleDouble files like "._clip.mov"):
+  skip_metadata: [".fseventsd", ".Spotlight-V100", ".Trashes", "._*"]
 
 retention:
   enabled: true

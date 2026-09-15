@@ -48,6 +48,16 @@ def test_parse_bracket_filename_preserved():
     assert size == 26146598760 and is_dir is False
 
 
+# Real line from Piro Deck4 (172.16.8.183): the clip's name is " .mov" (leading space).
+REAL_LEADING_SPACE_LINE = "-rw-rw-rw- 1 root root        421309096 Aug 26 20:48  .mov"
+
+
+def test_parse_preserves_leading_space_in_name():
+    name, is_dir, size, _ = parse_list_line(REAL_LEADING_SPACE_LINE)
+    assert name == " .mov"
+    assert size == 421309096 and is_dir is False
+
+
 def test_parse_dir_line():
     name, is_dir, size, _ = parse_list_line(REAL_DIR_LINE)
     assert name == "1" and is_dir is True and size == 0
@@ -394,6 +404,24 @@ nas:
 """,
     )
     assert load_config(p).require_mount is False
+
+
+def test_default_skip_metadata_filters_appledouble_files(tmp_path: Path):
+    """The default used to be "._", which fnmatch only matches literally, so macOS
+    AppleDouble files like "._clip.mov" were treated as video clips and archived."""
+    p = _write_cfg(
+        tmp_path,
+        """
+decks:
+  - name: Deck1
+    host: 10.0.0.1
+nas:
+  mount_root: /nas
+""",
+    )
+    skip = load_config(p).skip_metadata
+    assert is_metadata("._HyperDeck_0001.mov", skip)
+    assert not is_metadata("HyperDeck_0001.mov", skip)
 
 
 def test_load_config_auto_derives_number_from_name(tmp_path: Path):

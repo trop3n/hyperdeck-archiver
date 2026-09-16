@@ -11,13 +11,14 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from hyperdeck_archiver import cli as cli_mod  # noqa: E402
 from hyperdeck_archiver import ingest as ingest_mod  # noqa: E402
 from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
 from hyperdeck_archiver.bmd_client import parse_slot_info, parse_token  # noqa: E402
 from hyperdeck_archiver.config import DeckConfig, load_config  # noqa: E402
 from hyperdeck_archiver.ftp_client import FtpDeck, is_metadata, parse_list_line  # noqa: E402
-from hyperdeck_archiver.models import Clip, ClipResult, SlotResult  # noqa: E402
+from hyperdeck_archiver.models import Clip, ClipResult, RunSummary, SlotResult  # noqa: E402
 
 # ---- FTP LIST parsing (real lines from 172.16.9.81 / .82) ----
 
@@ -181,6 +182,40 @@ def test_select_prune_targets(tmp_path: Path):
 
 def test_select_prune_targets_empty(tmp_path: Path):
     assert nas.select_prune_targets(tmp_path, 30) == []
+
+
+@pytest.mark.parametrize(
+    ("pruned", "error", "expect_email", "expect_exit"),
+    [
+        ([], "", False, 0),  # nightly no-op: stay quiet
+        (["HyperDeck Backups/2026-08-10"], "", True, 0),  # deleted something: report it
+        ([], "NAS not ready: share not mounted", True, 1),  # failure: always report
+    ],
+)
+def test_prune_emails_only_on_deletion_or_error(
+    tmp_path: Path, monkeypatch, pruned, error, expect_email, expect_exit
+):
+    cfg_path = _write_cfg(
+        tmp_path,
+        f"""
+decks:
+  - name: Deck1
+    host: 10.0.0.1
+nas:
+  mount_root: /nas
+log:
+  file: {tmp_path / "test.log"}
+""",
+    )
+    summary = RunSummary(
+        command="prune", started_at=datetime(2026, 9, 17, 3), pruned=pruned, error=error
+    )
+    monkeypatch.setattr(cli_mod.prune, "run", lambda cfg, **kw: summary)
+    sent: list[RunSummary] = []
+    monkeypatch.setattr(cli_mod, "send_summary", lambda cfg, s: sent.append(s))
+
+    assert cli_mod.main(["--config", str(cfg_path), "prune"]) == expect_exit
+    assert (len(sent) == 1) is expect_email
 
 
 # ---- df parsing (free-space gate) ----

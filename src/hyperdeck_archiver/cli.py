@@ -114,7 +114,11 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "prune":
         summary = prune.run(cfg, dry_run=args.dry_run, retention_days=args.retention_days)
-        send = cfg.notify_on_success if not summary.error else cfg.notify_on_failure
+        # Prune runs nightly; a run that deletes nothing isn't worth an email.
+        if summary.error:
+            send = cfg.notify_on_failure
+        else:
+            send = cfg.notify_on_success and bool(summary.pruned)
         if send:
             send_summary(cfg, summary)
         return 0 if not summary.error else 1

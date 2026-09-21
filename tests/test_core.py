@@ -15,7 +15,11 @@ from hyperdeck_archiver import cli as cli_mod  # noqa: E402
 from hyperdeck_archiver import ingest as ingest_mod  # noqa: E402
 from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
-from hyperdeck_archiver.bmd_client import parse_slot_info, parse_token  # noqa: E402
+from hyperdeck_archiver.bmd_client import (  # noqa: E402
+    parse_disk_list,
+    parse_slot_info,
+    parse_token,
+)
 from hyperdeck_archiver.config import DeckConfig, load_config  # noqa: E402
 from hyperdeck_archiver.ftp_client import FtpDeck, is_metadata, parse_list_line  # noqa: E402
 from hyperdeck_archiver.models import Clip, ClipResult, RunSummary, SlotResult  # noqa: E402
@@ -167,6 +171,47 @@ def test_parse_token_present():
 def test_parse_token_absent_returns_none():
     assert parse_token(["200 ok"]) is None
     assert parse_token([]) is None
+
+
+# Real `disk list` reply from Piro Deck4 (HyperDeck Studio HD Plus, protocol 1.19),
+# including the clip whose name is " .mov". _cmd keeps the trailing \r.
+REAL_DISK_LIST = [
+    "206 disk list:\r",
+    "slot id: 2\r",
+    "device: sd2\r",
+    "1:  .mov QuickTimeProResHQ 720p60 00:00:15:09\r",
+    "2: HyperDeck_0001.mov QuickTimeProResHQ 720p60 00:00:54:01\r",
+]
+
+
+def test_parse_disk_list_keeps_names_whole():
+    assert parse_disk_list(REAL_DISK_LIST) == [
+        " .mov QuickTimeProResHQ 720p60 00:00:15:09",
+        "HyperDeck_0001.mov QuickTimeProResHQ 720p60 00:00:54:01",
+    ]
+
+
+def test_parse_disk_list_empty_slot():
+    assert parse_disk_list(["105 no disk\r"]) == []
+
+
+@pytest.mark.parametrize(
+    ("archived", "on_deck", "ok"),
+    [
+        ([" .mov", "HyperDeck_0001.mov"], parse_disk_list(REAL_DISK_LIST), True),
+        (
+            ["Blackmagic HyperDeck Studio Mini_0000.mov"],
+            ["Blackmagic HyperDeck Studio Mini_0000.mov QuickTimeProRes 1080i59.94 00:10:00:00"],
+            True,
+        ),
+        (["a.mov"], [], False),  # "105 no disk": nothing there
+        (["a.mov"], ["a.mov X 720p60 00:00:01:00", "b.mov X 720p60 00:00:01:00"], False),
+        (["a.mov"], ["b.mov X 720p60 00:00:01:00"], False),  # other card's clips
+        (["a.mov"], ["a.mov.bak X 720p60 00:00:01:00"], False),  # prefix is not a match
+    ],
+)
+def test_slot_mismatch(archived, on_deck, ok):
+    assert (ingest_mod._slot_mismatch(archived, on_deck) == "") is ok
 
 
 # ---- Prune date logic ----
@@ -594,9 +639,16 @@ class _FakeBmd:
         self.connected = False
         self.closed = False
         self.formatted: list[int] = []
+        self.disk: dict[int, list[str]] = {}  # slot -> `disk list` entries
+        self.disk_list_error: Exception | None = None
 
     def connect(self):
         self.connected = True
+
+    def disk_list(self, slot):
+        if self.disk_list_error:
+            raise self.disk_list_error
+        return list(self.disk.get(slot, []))
 
     def close(self):
         self.closed = True
@@ -742,6 +794,7 @@ def test_bmd_not_opened_when_not_clearing(tmp_path: Path, monkeypatch):
 
 def test_bmd_opened_and_closed_when_clearing(tmp_path: Path, monkeypatch):
     bmd = _FakeBmd("172.16.9.82")
+    bmd.disk = {1: ["a.mov QuickTimeProResHQ 720p60 00:00:01:00"]}
     ftp = _FakeFtp()
     ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: []}
     monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
@@ -759,3 +812,32 @@ def test_bmd_opened_and_closed_when_clearing(tmp_path: Path, monkeypatch):
     assert bmd.connected is True
     assert bmd.closed is True
     assert bmd.formatted == [1]
+
+
+@pytest.mark.parametrize("fault", ["other_card", "list_fails"])
+def test_clear_refused_unless_deck_slot_holds_the_archived_clips(
+    tmp_path: Path, monkeypatch, fault
+):
+    """Never format a slot the deck says holds something other than what was verified."""
+    bmd = _FakeBmd("172.16.9.82")
+    if fault == "other_card":
+        bmd.disk = {1: ["b.mov QuickTimeProResHQ 720p60 00:00:01:00"]}  # slot 2's card
+    else:
+        bmd.disk_list_error = OSError("timed out")
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: []}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", lambda host, **kw: bmd)
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+    result = ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=True,
+    )
+    assert bmd.formatted == []
+    slot1 = result.slots[0]
+    assert slot1.clear_skipped is True and slot1.cleared is False
+    assert slot1.error.startswith("clear skipped:")

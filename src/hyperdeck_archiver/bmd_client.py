@@ -20,6 +20,7 @@ BMD_PORT = 9993
 RECV_WINDOW = 0.6
 RECV_CAP = 6.0
 TOKEN_RE = re.compile(r"token:\s*(\S+)", re.IGNORECASE)
+DISK_LIST_ENTRY_RE = re.compile(r"^\d+: (.*)$")
 
 
 class BmdError(RuntimeError):
@@ -54,6 +55,21 @@ def parse_slot_info(lines: list[str]) -> SlotInfo:
         video_format=kv.get("video format", ""),
         blocked=kv.get("blocked", "false").lower() == "true",
     )
+
+
+def parse_disk_list(lines: list[str]) -> list[str]:
+    """Clip entries from a `disk list` reply, each "<name> <format> <video> <duration>".
+
+    Names can contain spaces (a deck recorded " .mov"; the Studio Mini writes
+    "Blackmagic HyperDeck Studio Mini_0000.mov"), so entries are kept whole and
+    matched by name prefix. An empty slot answers "105 no disk" and yields [].
+    """
+    entries = []
+    for line in lines:
+        m = DISK_LIST_ENTRY_RE.match(line.rstrip("\r"))
+        if m:
+            entries.append(m.group(1))
+    return entries
 
 
 def parse_token(lines: list[str]) -> str | None:
@@ -136,6 +152,9 @@ class BmdClient:
     def slot_info(self, slot: int) -> SlotInfo:
         lines = self._cmd(f"slot info: slot id: {slot}")
         return parse_slot_info(lines)
+
+    def disk_list(self, slot: int) -> list[str]:
+        return parse_disk_list(self._cmd(f"disk list: slot id: {slot}"))
 
     def format_prepare(self, slot: int, filesystem: str = "exFAT", name: str = "Media") -> str:
         command = f"format: slot id: {slot} prepare: {filesystem} name: {name}"

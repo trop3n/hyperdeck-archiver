@@ -147,6 +147,16 @@ def _ingest_slot(
     return sr
 
 
+def _slot_mismatch(archived: list[str], on_deck: list[str]) -> str:
+    """Why the deck's slot doesn't hold exactly the clips just archived ("" if it does)."""
+    if len(on_deck) != len(archived):
+        return f"deck lists {len(on_deck)} clip(s) in this slot but {len(archived)} were archived"
+    missing = [n for n in archived if not any(e == n or e.startswith(n + " ") for e in on_deck)]
+    if missing:
+        return "deck's slot doesn't list " + ", ".join(repr(n) for n in missing[:3])
+    return ""
+
+
 def _maybe_clear(
     cfg: Config,
     deck: DeckConfig,
@@ -177,6 +187,19 @@ def _maybe_clear(
         return
     if bmd is None:
         sr.error = "cannot clear: BMD control connection unavailable"
+        log.error("[%s slot %d] %s", deck.name, slot, sr.error)
+        return
+    # Last check before an irreversible format: the deck's own list for this slot
+    # must be exactly the clips just verified. If the control protocol's slot
+    # numbering ever disagreed with the FTP directory, formatting would wipe a card
+    # whose clips haven't been copied yet.
+    try:
+        mismatch = _slot_mismatch([c.clip.name for c in video], bmd.disk_list(slot))
+    except Exception as e:  # noqa: BLE001
+        mismatch = f"could not list the slot on the deck: {e}"
+    if mismatch:
+        sr.clear_skipped = True
+        sr.error = f"clear skipped: {mismatch}"
         log.error("[%s slot %d] %s", deck.name, slot, sr.error)
         return
     try:

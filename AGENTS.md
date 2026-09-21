@@ -67,6 +67,9 @@ failed ones automatically; `slot_cleared` is tracked per slot.
 - `ingest.clear_cards` (config) defaults **false**; `--no-clear` forces it off.
   When true, a slot is BMD-formatted only after every clip on it is downloaded +
   hash-verified. Never flip on without a clean full run first.
+- Before formatting, `_maybe_clear` asks the deck for its own clip list
+  (`disk list`) and skips the format unless it matches exactly the clips just
+  verified — a guard against BMD slot numbers disagreeing with FTP dir names.
 - `prune` deletes whole NAS date-folders older than `retention.days`. Test with
   `--dry-run` first.
 - `ensure_mount` refuses to run unless `mount_root` is a real mount point

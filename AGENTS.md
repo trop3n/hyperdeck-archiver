@@ -1,8 +1,10 @@
 # AGENTS.md
 
 Notes for OpenCode sessions working in this repo. `README.md` is empty; the real
-docs are `config.example.yaml` (heavily commented) and `SETUP-RASPBERRY-PI.md`
-(Linux/Pi reference — production is now a macOS iMac; see Deploy below).
+docs are `config.example.yaml` (heavily commented), `TROUBLESHOOTING.md` (deck
+triage when one won't show up — read-only 9993 commands, model differences,
+firmware caveats) and `SETUP-RASPBERRY-PI.md` (Linux/Pi reference — production is
+now a macOS iMac; see Deploy below).
 
 ## Run / dev entrypoint
 

@@ -115,7 +115,27 @@ def _ingest_slot(
             sr.clips.append(ClipResult(clip=clip, status="pending", dest_path=str(dest)))
             continue
 
-        cr = download_and_verify(ftp, clip, dest, cfg.hash_algo)
+        # Attempt 1 plus cfg.clip_retries more. A failed download/size-query
+        # typically leaves the control socket poisoned ('cannot read from timed
+        # out object'), so every attempt after the first needs a fresh
+        # connection; that same reconnect also leaves a clean link for the next
+        # clip. If the reconnect itself fails the deck has likely hung.
+        lost = ""
+        for attempt in range(1, cfg.clip_retries + 2):
+            cr = download_and_verify(ftp, clip, dest, cfg.hash_algo)
+            if cr.status != "failed":
+                break
+            try:
+                ftp.reconnect()
+            except Exception as e:  # noqa: BLE001
+                lost = f"FTP connection lost after failed clip {clip.name}: {e}"
+                break
+            if attempt <= cfg.clip_retries:
+                log.warning(
+                    "[%s slot %d] %s failed (%s); retry %d of %d",
+                    deck.name, slot, clip.name, cr.error, attempt, cfg.clip_retries,
+                )
+
         sr.clips.append(cr)
         entry = {
             "name": clip.name,
@@ -131,17 +151,10 @@ def _ingest_slot(
             manifest_mod.record_clip(mdata, deck.name, slot, entry)
             manifest_mod.save(cfg, date_str, mdata)
 
-        if cr.status == "failed":
-            # A failed download/size-query typically leaves the control socket
-            # poisoned ('cannot read from timed out object'). Reconnect so the
-            # next clip on this slot gets a clean connection instead of failing
-            # spuriously. If the reconnect itself fails the deck has likely hung.
-            try:
-                ftp.reconnect()
-            except Exception as e:  # noqa: BLE001
-                sr.error = f"FTP connection lost after failed clip {clip.name}: {e}"
-                log.error("[%s slot %d] %s", deck.name, slot, sr.error)
-                break
+        if lost:
+            sr.error = lost
+            log.error("[%s slot %d] %s", deck.name, slot, sr.error)
+            break
 
     _maybe_clear(cfg, deck, slot, bmd, sr, mdata, mlock, date_str, dry_run, do_clear)
     return sr

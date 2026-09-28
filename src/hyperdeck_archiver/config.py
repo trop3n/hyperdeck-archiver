@@ -35,6 +35,7 @@ class Config:
     min_free_gb: int
     require_mount: bool
     concurrency: int
+    clip_retries: int
     clear_cards: bool
     date_folder_format: str
     skip_metadata: tuple[str, ...]
@@ -159,6 +160,7 @@ def _build(raw: dict) -> Config:
         min_free_gb=int(nas.get("min_free_gb", 100)),
         require_mount=bool(nas.get("require_mount", True)),
         concurrency=int(ingest.get("concurrency", 4)),
+        clip_retries=max(0, int(ingest.get("clip_retries", 2))),
         clear_cards=bool(ingest.get("clear_cards", False)),
         date_folder_format=str(ingest.get("date_folder_format", "%Y-%m-%d")),
         skip_metadata=tuple(

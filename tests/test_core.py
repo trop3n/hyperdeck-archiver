@@ -168,9 +168,17 @@ def test_parse_token_present():
     assert parse_token(lines) == "ABC-123-XYZ"
 
 
+def test_parse_token_bare_after_216():
+    # Real reply from Smith Deck3 / Piro Deck4 / Hasley Deck5: the token is alone
+    # on the line after the status line, with no "token:" prefix. _cmd keeps the \r.
+    lines = ["216 format ready:\r", "zmfbyxp\r"]
+    assert parse_token(lines) == "zmfbyxp"
+
+
 def test_parse_token_absent_returns_none():
     assert parse_token(["200 ok"]) is None
     assert parse_token([]) is None
+    assert parse_token(["216 format ready:\r"]) is None
 
 
 # Real `disk list` reply from Piro Deck4 (HyperDeck Studio HD Plus, protocol 1.19),
@@ -664,6 +672,7 @@ class _IngestCfg:
     skip_metadata = (".fseventsd", "._*")
     hash_algo = "blake2b"
     rename_enabled = False
+    clip_retries = 0  # one attempt per clip; the retry tests below opt in explicitly
 
     def __init__(self, manifest_dir: Path):
         self.manifest_dir = manifest_dir
@@ -722,6 +731,94 @@ def test_ingest_slot_reconnects_after_failed_clip(tmp_path: Path, monkeypatch):
     assert sr.clips[0].status == "failed"
     assert sr.clips[1].status == "verified"
     assert sr.error == ""
+
+
+def _download_sequence(statuses: dict[str, list[str]]):
+    """Stub for download_and_verify giving a clip a different status per attempt."""
+    calls: dict[str, int] = {}
+
+    def _stub(deck, clip, dest_path, algo, logger=None):
+        n = calls.get(clip.name, 0)
+        calls[clip.name] = n + 1
+        seq = statuses.get(clip.name, ["verified"])
+        status = seq[min(n, len(seq) - 1)]
+        return ClipResult(clip=clip, status=status, dest_path=str(dest_path),
+                          error="timed out" if status == "failed" else "")
+
+    _stub.calls = calls
+    return _stub
+
+
+def test_ingest_slot_retries_failed_clip_until_it_verifies(tmp_path: Path, monkeypatch):
+    stub = _download_sequence({"a.mov": ["failed", "verified"]})
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify", stub)
+
+    cfg = _IngestCfg(tmp_path)
+    cfg.clip_retries = 2
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, None, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False, max_clips=None, counter=[0],
+    )
+    # Retried once on a fresh connection, then stopped: one result, slot clearable.
+    assert stub.calls["a.mov"] == 2
+    assert ftp.reconnects == 1
+    assert [c.status for c in sr.clips] == ["verified"]
+    assert sr.all_clips_verified is True
+
+
+def test_ingest_slot_gives_up_after_configured_retries(tmp_path: Path, monkeypatch):
+    stub = _download_sequence({"a.mov": ["failed"], "b.mov": ["verified"]})
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10), Clip(1, 2, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify", stub)
+
+    cfg = _IngestCfg(tmp_path)
+    cfg.clip_retries = 2
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, None, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False, max_clips=None, counter=[0],
+    )
+    # 1 + 2 attempts, one reconnect each, then on to the next clip. The clip is
+    # recorded failed exactly once, so it still blocks the slot's clear.
+    assert stub.calls["a.mov"] == 3
+    assert ftp.reconnects == 3
+    assert [c.status for c in sr.clips] == ["failed", "verified"]
+    assert sr.all_clips_verified is False
+    assert sr.error == ""
+    entry = manifest_mod.clip_entry(mdata, deck.name, 1, "a.mov")
+    assert entry["status"] == "failed"
+
+
+def test_ingest_slot_stops_retrying_when_reconnect_fails(tmp_path: Path, monkeypatch):
+    stub = _download_sequence({"a.mov": ["failed"]})
+    ftp = _FakeFtp()
+    ftp.reconnect_raises = True
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10), Clip(1, 2, "b.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify", stub)
+
+    cfg = _IngestCfg(tmp_path)
+    cfg.clip_retries = 2
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, None, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=False, max_clips=None, counter=[0],
+    )
+    # A dead control connection ends the slot immediately; retries never burn
+    # through a deck that has hung.
+    assert stub.calls["a.mov"] == 1
+    assert ftp.reconnects == 1
+    assert [c.status for c in sr.clips] == ["failed"]
+    assert sr.error.startswith("FTP connection lost")
 
 
 def test_ingest_slot_breaks_when_reconnect_fails(tmp_path: Path, monkeypatch):

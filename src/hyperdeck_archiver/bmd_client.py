@@ -20,6 +20,7 @@ BMD_PORT = 9993
 RECV_WINDOW = 0.6
 RECV_CAP = 6.0
 TOKEN_RE = re.compile(r"token:\s*(\S+)", re.IGNORECASE)
+BARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 DISK_LIST_ENTRY_RE = re.compile(r"^\d+: (.*)$")
 
 
@@ -73,10 +74,20 @@ def parse_disk_list(lines: list[str]) -> list[str]:
 
 
 def parse_token(lines: list[str]) -> str | None:
-    for line in lines:
+    """Token from a `format ... prepare` reply.
+
+    Two shapes seen in the field: a `token: <token>` line, and (Studio HD Plus /
+    Studio Mini, protocol 1.19) a `216 format ready:` status line with the bare
+    token alone on the next line.
+    """
+    for i, line in enumerate(lines):
         m = TOKEN_RE.search(line)
         if m:
             return m.group(1)
+        if _status_code(line) == 216 and i + 1 < len(lines):
+            candidate = lines[i + 1].strip()
+            if BARE_TOKEN_RE.match(candidate):
+                return candidate
     return None
 
 

@@ -64,6 +64,13 @@ ingest:
   concurrency: 6                   # max decks ingested in parallel. Set >= enabled-deck
                                    # count so no deck serializes behind the others
                                    # (5 decks planned -> 6 gives comfortable headroom).
+  clip_retries: 2                  # extra attempts per clip after a failed download
+                                   # (0 = one attempt, the old behaviour). Each retry
+                                   # reconnects first and re-downloads the whole clip
+                                   # from the start, so a deck that is truly down now
+                                   # takes this many times longer to give up on each
+                                   # of its clips. Aimed at the transient mid-transfer
+                                   # timeouts seen on large clips.
   clear_cards: false               # SET true AFTER the first successful archive.
                                    # When true, a slot is BMD-formatted only after
                                    # every clip on it is downloaded + verified.

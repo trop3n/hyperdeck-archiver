@@ -223,6 +223,11 @@ def _maybe_clear(
                 manifest_mod.mark_slot_cleared(mdata, deck.name, slot)
                 manifest_mod.save(cfg, date_str, mdata)
             log.info("[%s slot %d] card formatted (cleared)", deck.name, slot)
+        else:
+            # Never leave this silent: the format WAS issued, so an unconfirmed
+            # result means the card's state is unknown and needs a human look.
+            sr.error = "format not confirmed: slot still lists clips after the format"
+            log.error("[%s slot %d] %s", deck.name, slot, sr.error)
     except Exception as e:  # noqa: BLE001
         sr.error = f"format failed: {e}"
         log.error("[%s slot %d] %s", deck.name, slot, sr.error)

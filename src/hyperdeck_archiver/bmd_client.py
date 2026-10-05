@@ -19,6 +19,10 @@ from .models import SlotInfo
 BMD_PORT = 9993
 RECV_WINDOW = 0.6
 RECV_CAP = 6.0
+# A deck erasing a card can stay silent well past RECV_CAP, so an unanswered
+# `format: confirm` is resolved by watching the slot rather than assumed failed.
+FORMAT_SETTLE_TIMEOUT = 120.0
+FORMAT_POLL_INTERVAL = 3.0
 TOKEN_RE = re.compile(r"token:\s*(\S+)", re.IGNORECASE)
 BARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 DISK_LIST_ENTRY_RE = re.compile(r"^\d+: (.*)$")
@@ -178,9 +182,32 @@ class BmdClient:
             )
         return token
 
-    def format_confirm(self, token: str) -> bool:
+    def format_confirm(self, token: str) -> bool | None:
+        """Send `format: confirm`. True/False from the deck's status line, or
+        **None when the deck did not answer** — which is not a failure: erasing a
+        card routinely outlasts the read window, and treating silence as False
+        reported real wipes as 'no clear'. Callers resolve None by observing the
+        slot (see format_slot).
+        """
         lines = self._cmd(f"format: confirm: {token}")
-        return _status_code(lines[0]) < 400 if lines else False
+        if not lines:
+            return None
+        return _status_code(lines[0]) < 400
+
+    def slot_emptied(self, slot: int) -> bool:
+        """Watch the slot until it lists no clips (True) or the deck runs out of
+        time to finish (False). A deck mid-format may refuse or drop commands, so
+        errors here are retried rather than treated as an answer."""
+        deadline = time.monotonic() + FORMAT_SETTLE_TIMEOUT
+        while True:
+            try:
+                if not self.disk_list(slot):
+                    return True
+            except (BmdError, OSError):
+                pass
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(FORMAT_POLL_INTERVAL)
 
     def format_slot(self, slot: int, filesystem: str = "exFAT", name: str = "Media") -> bool:
         """Two-step format: prepare (returns token) then confirm (executes).
@@ -188,9 +215,16 @@ class BmdClient:
         DESTRUCTIVE: wipes the whole card in `slot`. Only call after every clip on
         the slot has been archived and verified. Aborts (returns False, no change)
         if the prepare token cannot be parsed.
+
+        The return value reports what the card actually did: a confirm the deck
+        never answered is settled by watching the slot empty out, so a successful
+        wipe is never reported as a failure (and vice versa).
         """
         token = self.format_prepare(slot, filesystem, name)
-        return self.format_confirm(token)
+        confirmed = self.format_confirm(token)
+        if confirmed is not None:
+            return confirmed
+        return self.slot_emptied(slot)
 
 
 @contextmanager

@@ -11,11 +11,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+from hyperdeck_archiver import bmd_client as bmd_mod  # noqa: E402
 from hyperdeck_archiver import cli as cli_mod  # noqa: E402
 from hyperdeck_archiver import ingest as ingest_mod  # noqa: E402
 from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
 from hyperdeck_archiver.bmd_client import (  # noqa: E402
+    BmdClient,
     parse_disk_list,
     parse_slot_info,
     parse_token,
@@ -179,6 +181,80 @@ def test_parse_token_absent_returns_none():
     assert parse_token(["200 ok"]) is None
     assert parse_token([]) is None
     assert parse_token(["216 format ready:\r"]) is None
+
+
+# Regression: the 2026-10-05 run formatted every card successfully but reported
+# "no clear" on all of them. format_confirm read the reply with the normal 0.6s
+# quiet window; a deck erasing a 128 GB card answers later than that, so the reply
+# came back empty and was treated as failure. Nothing was logged, no error was set,
+# and the manifest kept cleared=False for cards that had just been wiped.
+
+class _ScriptedBmd(BmdClient):
+    """BmdClient with the socket removed: _cmd answers from a script."""
+
+    def __init__(self, replies):
+        super().__init__("h")
+        self._replies = replies
+        self.sent: list[str] = []
+
+    def _cmd(self, command):
+        self.sent.append(command)
+        reply = self._replies(command, self.sent)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def test_format_confirm_none_when_deck_stays_silent():
+    c = _ScriptedBmd(lambda cmd, sent: [])
+    assert c.format_confirm("tok") is None  # not False: silence is not failure
+
+
+def test_format_confirm_reads_status_line():
+    assert _ScriptedBmd(lambda cmd, sent: ["200 ok"]).format_confirm("tok") is True
+    assert _ScriptedBmd(lambda cmd, sent: ["406 disk error"]).format_confirm("tok") is False
+
+
+def _format_script(confirm_reply, disk_lists):
+    """prepare -> 216+token, confirm -> confirm_reply, then disk list per call."""
+    seq = list(disk_lists)
+
+    def _reply(cmd, sent):
+        if cmd.startswith("format:") and "prepare" in cmd:
+            return ["216 format ready:\r", "zmfbyxp\r"]
+        if cmd.startswith("format: confirm"):
+            return confirm_reply
+        return seq.pop(0) if seq else []
+
+    return _reply
+
+
+def test_format_slot_confirms_an_unanswered_format_by_watching_the_slot(monkeypatch):
+    monkeypatch.setattr(bmd_mod.time, "sleep", lambda s: None)
+    # Deck says nothing to the confirm, is still busy on the first poll, then empty.
+    c = _ScriptedBmd(_format_script([], [["1: a.mov x y z"], []]))
+    assert c.format_slot(2) is True
+    assert any(x.startswith("format: confirm") for x in c.sent)
+
+
+def test_format_slot_false_when_the_slot_never_empties(monkeypatch):
+    monkeypatch.setattr(bmd_mod, "FORMAT_SETTLE_TIMEOUT", 0.0)
+    monkeypatch.setattr(bmd_mod.time, "sleep", lambda s: None)
+    c = _ScriptedBmd(_format_script([], [["1: a.mov x y z"]]))
+    assert c.format_slot(2) is False
+
+
+def test_format_slot_trusts_an_explicit_reply_without_polling():
+    c = _ScriptedBmd(_format_script(["200 ok"], []))
+    assert c.format_slot(2) is True
+    assert not any(x.startswith("disk list") for x in c.sent)
+
+
+def test_slot_emptied_retries_while_the_deck_is_busy(monkeypatch):
+    monkeypatch.setattr(bmd_mod.time, "sleep", lambda s: None)
+    seq = [bmd_mod.BmdError("busy"), OSError("dropped"), []]
+    c = _ScriptedBmd(lambda cmd, sent: seq.pop(0))
+    assert c.slot_emptied(2) is True
 
 
 # Real `disk list` reply from Piro Deck4 (HyperDeck Studio HD Plus, protocol 1.19),
@@ -661,9 +737,11 @@ class _FakeBmd:
     def close(self):
         self.closed = True
 
+    format_result = True  # False = deck issued the format but never confirmed it
+
     def format_slot(self, slot, *a, **kw):
         self.formatted.append(slot)
-        return True
+        return self.format_result
 
 
 class _IngestCfg:
@@ -887,6 +965,31 @@ def test_bmd_not_opened_when_not_clearing(tmp_path: Path, monkeypatch):
         datetime(2026, 7, 13), dry_run=False, do_clear=False,
     )
     assert made["n"] == 0
+
+
+def test_unconfirmed_format_is_reported_not_swallowed(tmp_path: Path, monkeypatch):
+    """Regression (2026-10-05): format_slot returning False set no error and logged
+    nothing, so a wipe whose outcome was unknown surfaced as a healthy 'no clear'."""
+    bmd = _FakeBmd("172.16.9.82")
+    bmd.format_result = False
+    bmd.disk = {1: ["a.mov QuickTimeProResHQ 720p60 00:00:01:00"]}
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)]}
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck2", host="172.16.9.82", slots=(1,))
+    mdata = manifest_mod.load(cfg, "2026-07-13")
+
+    sr = ingest_mod._ingest_slot(
+        cfg, deck, 1, ftp, bmd, tmp_path, mdata, threading.Lock(), "2026-07-13",
+        datetime(2026, 7, 13), dry_run=False, do_clear=True, max_clips=None, counter=[0],
+    )
+    assert bmd.formatted == [1]
+    assert sr.cleared is False
+    assert "not confirmed" in sr.error          # the run is marked FAILED
+    # and the manifest is not told the slot was cleared
+    assert manifest_mod.slot_cleared(mdata, deck.name, 1) is False
 
 
 def test_bmd_opened_and_closed_when_clearing(tmp_path: Path, monkeypatch):

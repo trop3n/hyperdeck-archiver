@@ -1,8 +1,8 @@
 [Unit]
-Description=HyperDeck Archiver - weekly ingest
+Description=HyperDeck Archiver - nightly ingest
 
 [Timer]
-OnCalendar=Mon *-*-* 01:00:00
+OnCalendar=*-*-* 01:00:00
 Persistent=true
 
 [Install]

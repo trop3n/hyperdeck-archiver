@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Weekly ingest. Install: cp to ~/Library/LaunchAgents/ then:
+<!-- Nightly ingest. Install: cp to ~/Library/LaunchAgents/ then:
      launchctl load -w ~/Library/LaunchAgents/com.samc.hyperdeck-archiver.ingest.plist
      Replace @@VENV_PYTHON@@ and @@INSTALL_DIR@@ with absolute paths. -->
 <plist version="1.0">
@@ -19,8 +19,6 @@
     <string>@@INSTALL_DIR@@</string>
     <key>StartCalendarInterval</key>
     <dict>
-        <key>Weekday</key>
-        <integer>1</integer>
         <key>Hour</key>
         <integer>1</integer>
         <key>Minute</key>

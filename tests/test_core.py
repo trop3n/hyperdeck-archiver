@@ -24,7 +24,13 @@ from hyperdeck_archiver.bmd_client import (  # noqa: E402
 )
 from hyperdeck_archiver.config import DeckConfig, load_config  # noqa: E402
 from hyperdeck_archiver.ftp_client import FtpDeck, is_metadata, parse_list_line  # noqa: E402
-from hyperdeck_archiver.models import Clip, ClipResult, RunSummary, SlotResult  # noqa: E402
+from hyperdeck_archiver.models import (  # noqa: E402
+    Clip,
+    ClipResult,
+    DeckResult,
+    RunSummary,
+    SlotResult,
+)
 
 # ---- FTP LIST parsing (real lines from 172.16.9.81 / .82) ----
 
@@ -1087,3 +1093,22 @@ def test_empty_deck_list_is_rechecked_on_a_new_connection(
     else:
         assert bmd.formatted == [] and slot2.clear_skipped is True
         assert "deck lists 0 clip(s)" in slot2.error
+
+
+def test_failed_clip_marks_deck_and_run_failed():
+    """2026-11-04: a clip still being recorded failed (553), the slot's clear was
+    skipped without a slot error, and the email still said OK."""
+    from hyperdeck_archiver.notifier import render_summary
+
+    failed = ClipResult(clip=Clip(1, 1, "a.mov", None), status="failed",
+                        error="size query failed: 553")
+    slot = SlotResult(deck="Deck1", slot=1, clips=[failed], clear_skipped=True)
+    deck = DeckResult(deck="Deck1", host="h", slots=[slot])
+    summary = RunSummary(command="ingest", started_at=datetime(2026, 11, 4, 1, 0),
+                         decks=[deck])
+
+    assert deck.ok is False
+    assert summary.succeeded is False
+    subject, body = render_summary(summary)
+    assert "FAILED" in subject
+    assert "[ERROR] Deck1" in body

@@ -77,7 +77,11 @@ class DeckResult:
 
     @property
     def ok(self) -> bool:
-        return not self.error and all(not s.error for s in self.slots)
+        # A failed clip leaves no slot error (it only blocks the clear), but the
+        # footage is still uncopied, so the deck must not report OK.
+        return not self.error and all(
+            not s.error and all(c.status != "failed" for c in s.clips) for s in self.slots
+        )
 
     @property
     def bytes_copied(self) -> int:

@@ -207,7 +207,19 @@ def _maybe_clear(
     # numbering ever disagreed with the FTP directory, formatting would wipe a card
     # whose clips haven't been copied yet.
     try:
-        mismatch = _slot_mismatch([c.clip.name for c in video], bmd.disk_list(slot))
+        on_deck = bmd.disk_list(slot)
+        if not on_deck:
+            # Studio Minis (protocol 1.11) list slot 2 as empty on the same control
+            # session after slot 1 was formatted (2026-10-26, 11-02); a fresh
+            # connection lists it correctly. Ask once more on a new session. The
+            # exact-match check below still decides, so this can only unblock a
+            # clear the deck genuinely agrees with.
+            log.warning("[%s slot %d] deck listed no clips; re-checking on a new "
+                        "connection", deck.name, slot)
+            bmd.close()
+            bmd.connect()
+            on_deck = bmd.disk_list(slot)
+        mismatch = _slot_mismatch([c.clip.name for c in video], on_deck)
     except Exception as e:  # noqa: BLE001
         mismatch = f"could not list the slot on the deck: {e}"
     if mismatch:

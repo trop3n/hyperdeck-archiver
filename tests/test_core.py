@@ -1062,7 +1062,9 @@ class _StaleListBmd(_FakeBmd):
         self.sessions += 1
 
     def disk_list(self, slot):
-        if self.sessions < 2 or not self.recovers:
+        # Still stale on the fresh session opened for the clear (seen 2026-11-16:
+        # empty for >15 s after the other slot's format); recovers on the re-check.
+        if self.sessions < 3 or not self.recovers:
             return []
         return super().disk_list(slot)
 
@@ -1086,13 +1088,52 @@ def test_empty_deck_list_is_rechecked_on_a_new_connection(
         cfg, deck, tmp_path, mdata, threading.Lock(), "2026-11-02",
         datetime(2026, 11, 2), dry_run=False, do_clear=True,
     )
-    assert bmd.sessions == 2  # exactly one reconnect for the re-check
+    assert bmd.sessions == 3  # deck start + fresh session for the clear + one re-check
     slot2 = result.slots[1]
     if recovers:
         assert bmd.formatted == [2] and slot2.cleared is True
     else:
         assert bmd.formatted == [] and slot2.clear_skipped is True
         assert "deck lists 0 clip(s)" in slot2.error
+
+
+class _IdleDropBmd(_FakeBmd):
+    """Studio Mini behaviour: the session opened at deck start is dropped while
+    it sits idle through a long FTP transfer."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.sessions = 0
+
+    def connect(self):
+        super().connect()
+        self.sessions += 1
+
+    def disk_list(self, slot):
+        if self.sessions < 2:
+            raise BrokenPipeError(32, "Broken pipe")
+        return super().disk_list(slot)
+
+
+def test_clear_uses_a_fresh_control_session(tmp_path: Path, monkeypatch):
+    """2026-11-12/15/16: clears failed with Broken pipe after hours of FTP."""
+    bmd = _IdleDropBmd("172.16.9.81")
+    bmd.disk = {1: ["a.mov QuickTimeProResLT 1080i5994 00:00:01;00"]}
+    ftp = _FakeFtp()
+    ftp.clips_by_slot = {1: [Clip(1, 1, "a.mov", 10)], 2: []}
+    monkeypatch.setattr(ingest_mod, "FtpDeck", lambda host, **kw: ftp)
+    monkeypatch.setattr(ingest_mod, "BmdClient", lambda host, **kw: bmd)
+    monkeypatch.setattr(ingest_mod, "download_and_verify", _download_returning({}))
+
+    cfg = _IngestCfg(tmp_path)
+    deck = DeckConfig(name="Deck1", host="172.16.9.81", slots=(1, 2))
+    mdata = manifest_mod.load(cfg, "2026-11-16")
+    result = ingest_mod._ingest_deck(
+        cfg, deck, tmp_path, mdata, threading.Lock(), "2026-11-16",
+        datetime(2026, 11, 16), dry_run=False, do_clear=True,
+    )
+    assert bmd.formatted == [1]
+    assert result.slots[0].cleared is True and not result.slots[0].error
 
 
 def test_failed_clip_marks_deck_and_run_failed():

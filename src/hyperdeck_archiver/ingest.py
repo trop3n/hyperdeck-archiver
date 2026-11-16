@@ -207,6 +207,12 @@ def _maybe_clear(
     # numbering ever disagreed with the FTP directory, formatting would wipe a card
     # whose clips haven't been copied yet.
     try:
+        # Fresh control session for the clear. The one opened at deck start sits
+        # idle through hours of FTP, and Studio Minis drop it somewhere between
+        # ~77 and ~139 min, so the list below hit "[Errno 32] Broken pipe"
+        # (2026-11-12, 11-15, 11-16).
+        bmd.close()
+        bmd.connect()
         on_deck = bmd.disk_list(slot)
         if not on_deck:
             # Studio Minis (protocol 1.11) list slot 2 as empty on the same control

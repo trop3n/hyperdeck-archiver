@@ -18,6 +18,7 @@ from hyperdeck_archiver import manifest as manifest_mod  # noqa: E402
 from hyperdeck_archiver import nas  # noqa: E402
 from hyperdeck_archiver.bmd_client import (  # noqa: E402
     BmdClient,
+    BmdError,
     parse_disk_list,
     parse_slot_info,
     parse_token,
@@ -203,7 +204,7 @@ class _ScriptedBmd(BmdClient):
         self._replies = replies
         self.sent: list[str] = []
 
-    def _cmd(self, command):
+    def _cmd(self, command, first_wait=None):
         self.sent.append(command)
         reply = self._replies(command, self.sent)
         if isinstance(reply, Exception):
@@ -254,6 +255,39 @@ def test_format_slot_trusts_an_explicit_reply_without_polling():
     c = _ScriptedBmd(_format_script(["200 ok"], []))
     assert c.format_slot(2) is True
     assert not any(x.startswith("disk list") for x in c.sent)
+
+
+def test_format_prepare_retries_once_on_a_fresh_session_when_silent(monkeypatch):
+    # 2026-11-19/20: Deck1 answered prepare with nothing; a second ask works.
+    replies = [[], ["216 format ready:\r", "zmfbyxp\r"]]
+    c = _ScriptedBmd(lambda cmd, sent: replies.pop(0))
+    reconnects = []
+    monkeypatch.setattr(c, "connect", lambda: reconnects.append(1))
+    assert c.format_prepare(1) == "zmfbyxp"
+    assert len(reconnects) == 1 and len(c.sent) == 2
+
+
+def test_format_prepare_gives_up_after_the_retry(monkeypatch):
+    c = _ScriptedBmd(lambda cmd, sent: [])
+    monkeypatch.setattr(c, "connect", lambda: None)
+    with pytest.raises(BmdError, match="no parseable token"):
+        c.format_prepare(1)
+    assert len(c.sent) == 2
+
+
+def test_read_block_waits_longer_for_a_slow_first_byte():
+    import socket
+    import threading
+
+    a, b = socket.socketpair()
+    c = BmdClient("h")
+    c._sock = a
+    threading.Timer(1.0, lambda: b.sendall(b"216 format ready:\r\nabc\r\n\r\n")).start()
+    try:
+        assert b"abc" in c._read_block(first_wait=5.0)
+    finally:
+        a.close()
+        b.close()
 
 
 def test_slot_emptied_retries_while_the_deck_is_busy(monkeypatch):

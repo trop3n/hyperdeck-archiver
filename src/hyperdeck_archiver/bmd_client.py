@@ -23,6 +23,10 @@ RECV_CAP = 6.0
 # `format: confirm` is resolved by watching the slot rather than assumed failed.
 FORMAT_SETTLE_TIMEOUT = 120.0
 FORMAT_POLL_INTERVAL = 3.0
+# How long to wait for the FIRST byte of a format reply. A Studio Mini usually
+# answers prepare in ~0.05 s, but right after a long FTP download it sometimes
+# stayed silent past RECV_WINDOW and the reply was lost (2026-11-19, 11-20).
+FORMAT_REPLY_WAIT = 10.0
 TOKEN_RE = re.compile(r"token:\s*(\S+)", re.IGNORECASE)
 BARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 DISK_LIST_ENTRY_RE = re.compile(r"^\d+: (.*)$")
@@ -122,15 +126,17 @@ class BmdClient:
     def __exit__(self, *exc) -> None:
         self.close()
 
-    def _read_block(self) -> bytes:
+    def _read_block(self, first_wait: float = RECV_WINDOW) -> bytes:
         """Read a reply: burst-read with a short quiet timeout, fast-exit on the
         blank line that terminates multi-line replies. Single-line replies (e.g.
-        ping's '200 ok') have no blank line and simply end after a quiet gap."""
+        ping's '200 ok') have no blank line and simply end after a quiet gap.
+        `first_wait` is how long to wait for the first byte; after that the
+        normal RECV_WINDOW quiet gap applies."""
         assert self._sock is not None
-        self._sock.settimeout(RECV_WINDOW)
+        self._sock.settimeout(first_wait)
         buf = bytearray()
         start = time.monotonic()
-        while time.monotonic() - start < RECV_CAP:
+        while time.monotonic() - start < first_wait + RECV_CAP:
             try:
                 chunk = self._sock.recv(4096)
             except socket.timeout:
@@ -140,18 +146,19 @@ class BmdClient:
             if not chunk:
                 break
             buf.extend(chunk)
+            self._sock.settimeout(RECV_WINDOW)
             if buf.endswith(b"\r\n\r\n") or buf.endswith(b"\n\n"):
                 break
         return bytes(buf)
 
-    def _read_block_text(self) -> str:
-        return self._read_block().decode("utf-8", "replace")
+    def _read_block_text(self, first_wait: float = RECV_WINDOW) -> str:
+        return self._read_block(first_wait).decode("utf-8", "replace")
 
-    def _cmd(self, command: str) -> list[str]:
+    def _cmd(self, command: str, first_wait: float = RECV_WINDOW) -> list[str]:
         if self._sock is None:
             raise BmdError("not connected")
         self._sock.sendall(command.encode("utf-8") + b"\n")
-        block = self._read_block_text()
+        block = self._read_block_text(first_wait)
         result = [ln for ln in block.split("\n") if ln.strip() != ""]
         status = _status_code(result[0]) if result else 0
         if status >= 500 and status != 500:
@@ -173,8 +180,16 @@ class BmdClient:
 
     def format_prepare(self, slot: int, filesystem: str = "exFAT", name: str = "Media") -> str:
         command = f"format: slot id: {slot} prepare: {filesystem} name: {name}"
-        lines = self._cmd(command)
+        lines = self._cmd(command, first_wait=FORMAT_REPLY_WAIT)
         token = parse_token(lines)
+        if not token:
+            # Prepare is harmless to repeat (nothing is erased without confirm).
+            # Ask once more on a fresh session so a late reply to the first
+            # request can't be mistaken for the answer to the second.
+            self.close()
+            self.connect()
+            lines = self._cmd(command, first_wait=FORMAT_REPLY_WAIT)
+            token = parse_token(lines)
         if not token:
             raise BmdError(
                 f"format prepare for slot {slot} returned no parseable token: "
@@ -189,7 +204,7 @@ class BmdClient:
         reported real wipes as 'no clear'. Callers resolve None by observing the
         slot (see format_slot).
         """
-        lines = self._cmd(f"format: confirm: {token}")
+        lines = self._cmd(f"format: confirm: {token}", first_wait=FORMAT_REPLY_WAIT)
         if not lines:
             return None
         return _status_code(lines[0]) < 400
